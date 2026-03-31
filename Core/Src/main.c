@@ -31,7 +31,12 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define MY_LAST2         24    /* 2 digit terakhir NIM sendiri  */
+#define PARTNER_LAST2    19    /* 2 digit terakhir NIM partner  */
+#define SHIFT_DELAY_MS   300   /* kecepatan shift Mode 1        */
+#define COUNTER_DELAY_MS 100   /* kecepatan counter Mode 2 (ms) */
+#define ADC_POLL_MS      50    /* polling ADC Mode 3 (ms)       */
+#define DEBOUNCE_MS      200   /* debounce tombol (ms)          */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,7 +49,23 @@ ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 /* USER CODE BEGIN PV */
+/* ---- kontrol mode ---- */
+volatile uint8_t current_mode  = 1;   /* mode aktif: 1, 2, atau 3          */
+volatile uint8_t btn1_flag     = 0;   /* set oleh EXTI BTN1                 */
+volatile uint8_t btn2_flag     = 0;   /* set oleh EXTI BTN2                 */
+uint32_t btn1_last_tick        = 0;
+uint32_t btn2_last_tick        = 0;
 
+/* ---- Mode 1: shift left ---- */
+uint8_t shift_pos = 0;                /* posisi LED yang menyala (0-7)      */
+
+/* ---- Mode 2: counter (dipantau Cube Monitor - Chart) ---- */
+uint32_t counter_value = 0;           /* nilai counter saat ini             */
+uint8_t  counter_phase = 0;           /* 0 = NIM sendiri, 1 = NIM partner   */
+
+/* ---- Mode 3: ADC -> LED (dipantau Cube Monitor - Gauge) ---- */
+uint32_t adc_dma_val = 0;             /* buffer DMA hasil ADC               */
+uint32_t led_count   = 0;            /* jumlah LED menyala (0-8)           */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -58,6 +79,34 @@ static void MX_ADC1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/* Tabel urutan LED 1-8 */
+typedef struct { GPIO_TypeDef *port; uint16_t pin; } LED_t;
+static const LED_t leds[8] = {
+    {LED1_GPIO_Port, LED1_Pin},
+    {LED2_GPIO_Port, LED2_Pin},
+    {LED3_GPIO_Port, LED3_Pin},
+    {LED4_GPIO_Port, LED4_Pin},
+    {LED5_GPIO_Port, LED5_Pin},
+    {LED6_GPIO_Port, LED6_Pin},
+    {LED7_GPIO_Port, LED7_Pin},
+    {LED8_GPIO_Port, LED8_Pin},
+};
+
+/**
+ * Set LED berdasarkan bit-pattern 8-bit.
+ * bit-0 = LED1, bit-7 = LED8.
+ */
+static void set_leds(uint8_t pattern)
+{
+    for (int i = 0; i < 8; i++) {
+        HAL_GPIO_WritePin(leds[i].port, leds[i].pin,
+                          ((pattern >> i) & 1u) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    }
+}
+
+static void all_leds_on(void)  { set_leds(0xFF); }
+static void all_leds_off(void) { set_leds(0x00); }
 
 /* USER CODE END 0 */
 
@@ -93,7 +142,8 @@ int main(void)
   MX_DMA_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-
+  /* Mulai ADC secara continuous via DMA; adc_dma_val diperbarui otomatis */
+  HAL_ADC_Start_DMA(&hadc1, &adc_dma_val, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -103,6 +153,113 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    /* ============================================================
+     * BTN2 (INTERRUPT): semua LED nyala 5 detik, lalu kembali ke
+     * mode sebelumnya secara otomatis.
+     * ============================================================ */
+    if (btn2_flag) {
+      btn2_flag = 0;
+      all_leds_on();
+      HAL_Delay(5000);
+      all_leds_off();
+      /* Reset state mode agar mode aktif mulai dari awal */
+      shift_pos     = 0;
+      counter_value = 0;
+      counter_phase = 0;
+    }
+
+    /* ============================================================
+     * BTN1: ganti mode  1 -> 2 -> 3 -> 1 -> ...
+     * ============================================================ */
+    if (btn1_flag) {
+      btn1_flag   = 0;
+      current_mode = (current_mode % 3) + 1;
+      shift_pos     = 0;
+      counter_value = 0;
+      counter_phase = 0;
+      all_leds_off();
+    }
+
+    /* ============================================================
+     * Eksekusi mode aktif
+     * ============================================================ */
+    switch (current_mode)
+    {
+      /* ----------------------------------------------------------
+       * MODE 1: Shift Left
+       * Satu LED menyala bergeser dari LED1 -> LED2 -> ... -> LED8
+       * lalu kembali ke LED1.
+       * ---------------------------------------------------------- */
+      case 1:
+      {
+        /* step 0-7: LED1..LED8 menyala satu per satu
+         * step 8  : semua mati, lalu mulai ulang */
+        if (shift_pos < 8) {
+          set_leds((uint8_t)(1u << shift_pos));
+        } else {
+          set_leds(0x00);
+        }
+        shift_pos = (shift_pos + 1) % 9;
+        HAL_Delay(SHIFT_DELAY_MS);
+        break;
+      }
+
+      /* ----------------------------------------------------------
+       * MODE 2: Counter + Cube Monitor (Chart)
+       * LED semua padam.
+       * counter_value: 0 -> MY_LAST2 (24), reset ke 0,
+       *                0 -> PARTNER_LAST2 (19), reset ke 0, dst.
+       * Pantau variabel "counter_value" di Cube Monitor (Chart).
+       * ---------------------------------------------------------- */
+      case 2:
+      {
+        all_leds_off();
+
+        uint32_t target = (counter_phase == 0) ? MY_LAST2 : PARTNER_LAST2;
+        HAL_Delay(COUNTER_DELAY_MS);
+        counter_value++;
+        if (counter_value > target) {
+          counter_value = 0;
+          counter_phase ^= 1u;
+        }
+        break;
+      }
+
+      /* ----------------------------------------------------------
+       * MODE 3: Potensiometer -> LED + Cube Monitor (Gauge)
+       * ADC 12-bit (0-4095):
+       *   adc = 0       -> 0 LED menyala
+       *   adc >= 895    -> 8 LED menyala
+       *   di antaranya  -> proporsional (LED1..LEDn menyala)
+       * Pantau variabel "led_count" di Cube Monitor (Gauge, 0-8).
+       * ---------------------------------------------------------- */
+      case 3:
+      {
+        uint32_t adc = adc_dma_val;
+
+        if (adc == 0) {
+          led_count = 0;
+        } else if (adc >= 895) {
+          led_count = 8;
+        } else {
+          led_count = (adc * 8u) / 895u;
+          if (led_count == 0) led_count = 1;   /* minimal 1 jika adc > 0 */
+        }
+
+        /* Nyalakan led_count LED berturut-turut dari LED1 */
+        uint8_t pattern = (led_count >= 8) ? 0xFFu
+                                           : (uint8_t)((1u << led_count) - 1u);
+        set_leds(pattern);
+        HAL_Delay(ADC_POLL_MS);
+        break;
+      }
+
+      default:
+        current_mode = 1;
+        break;
+    }
+
   }
   /* USER CODE END 3 */
 }
@@ -274,6 +431,30 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+ * Callback EXTI (dipanggil oleh HAL_GPIO_EXTI_IRQHandler di stm32f4xx_it.c).
+ * BTN1 (PA1) : set flag ganti mode, debounce 200 ms.
+ * BTN2 (PA2) : set flag interrupt 5 detik, debounce 200 ms.
+ */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  uint32_t now = HAL_GetTick();
+
+  if (GPIO_Pin == BTN1_Pin) {
+    if ((now - btn1_last_tick) > DEBOUNCE_MS) {
+      btn1_last_tick = now;
+      btn1_flag = 1;
+    }
+  }
+
+  if (GPIO_Pin == BTN2_Pin) {
+    if ((now - btn2_last_tick) > DEBOUNCE_MS) {
+      btn2_last_tick = now;
+      btn2_flag = 1;
+    }
+  }
+}
 
 /* USER CODE END 4 */
 
