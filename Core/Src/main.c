@@ -64,7 +64,7 @@ uint32_t counter_value = 0;           /* nilai counter saat ini             */
 uint8_t  counter_phase = 0;           /* 0 = NIM sendiri, 1 = NIM partner   */
 
 /* ---- Mode 3: ADC -> LED (dipantau Cube Monitor - Gauge) ---- */
-uint32_t adc_dma_val = 0;             /* buffer DMA hasil ADC               */
+volatile uint32_t adc_dma_val = 0;    /* buffer DMA hasil ADC               */
 uint32_t led_count   = 0;            /* jumlah LED menyala (0-8)           */
 /* USER CODE END PV */
 
@@ -156,17 +156,15 @@ int main(void)
 
     /* ============================================================
      * BTN2 (INTERRUPT): semua LED nyala 5 detik, lalu kembali ke
-     * mode sebelumnya secara otomatis.
+     * mode yang sama sebelum interrupt secara otomatis.
+     * State mode TIDAK direset agar melanjutkan dari posisi terakhir.
      * ============================================================ */
     if (btn2_flag) {
       btn2_flag = 0;
       all_leds_on();
       HAL_Delay(5000);
       all_leds_off();
-      /* Reset state mode agar mode aktif mulai dari awal */
-      shift_pos     = 0;
-      counter_value = 0;
-      counter_phase = 0;
+      /* Tidak ada reset state — mode melanjutkan dari posisi terakhir */
     }
 
     /* ============================================================
@@ -398,8 +396,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : BTN1_Pin BTN2_Pin */
   GPIO_InitStruct.Pin = BTN1_Pin|BTN2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;  /* button ke GND -> aktif LOW */
+  GPIO_InitStruct.Pull = GPIO_PULLUP;            /* pull-up internal */
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LED8_Pin LED4_Pin LED3_Pin LED2_Pin
