@@ -66,6 +66,12 @@ uint8_t  counter_phase = 0;           /* 0 = NIM sendiri, 1 = NIM partner   */
 /* ---- Mode 3: ADC -> LED (dipantau Cube Monitor - Gauge) ---- */
 volatile uint32_t adc_dma_val = 0;    /* buffer DMA hasil ADC               */
 volatile uint32_t led_count   = 0;    /* jumlah LED menyala (0-8)           */
+
+/* ---- Mode 4: dua kereta bertabrakan ---- */
+uint8_t train_step = 0;               /* langkah animasi kereta (0-2)       */
+
+/* ---- Mode 5: binary counter 0-255 ---- */
+uint8_t binary_count = 0;            /* nilai counter biner saat ini (0-255) */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -172,10 +178,12 @@ int main(void)
      * ============================================================ */
     if (btn1_flag) {
       btn1_flag   = 0;
-      current_mode = (current_mode % 3) + 1;
+      current_mode = (current_mode % 5) + 1;
       shift_pos     = 0;
       counter_value = 0;
       counter_phase = 0;
+      train_step    = 0;
+      binary_count  = 0;
       all_leds_off();
     }
 
@@ -250,6 +258,74 @@ int main(void)
         set_leds(pattern);
         
         HAL_Delay(ADC_POLL_MS);
+        break;
+      }
+
+      /* ----------------------------------------------------------
+       * MODE 4: Dua kereta bertabrakan (panjang 3 LED masing-masing)
+       * Kereta kiri  : mulai LED1..LED3, bergerak ke kanan.
+       * Kereta kanan : mulai LED6..LED8, bergerak ke kiri.
+       * Saat step-2 keduanya bertemu di tengah (tabrakan) -> flash
+       * semua LED, lalu animasi diulang dari awal.
+       * Potensiometer: ADC makin besar -> delay makin kecil -> makin cepat.
+       *   ADC = 0    -> delay 500 ms (lambat)
+       *   ADC = 4095 -> delay  50 ms (cepat)
+       * ---------------------------------------------------------- */
+      case 4:
+      {
+        /* 14-langkah animasi kereta: terbentuk -> bertabrakan -> berpencar
+         *
+         * step  0: ○○○○○○○○  semua mati (awal siklus)
+         * step  1: ●○○○○○○●  1 LED tiap sisi
+         * step  2: ●●○○○○●●  2 LED tiap sisi
+         * step  3: ●●●○○●●●  3 LED tiap sisi (kereta terbentuk penuh)
+         * step  4: ○●●●●●●○  bergerak ke tengah
+         * step  5: ○○●●●●○○  semakin dekat
+         * step  6: ○○○●●○○○  tabrakan — menyatu di tengah
+         * step  7: ○○○○○○○○  semua mati (puncak tabrakan)
+         * step  8: ○○○●●○○○  muncul kembali di tengah
+         * step  9: ○○●●●●○○  berpencar keluar
+         * step 10: ○●●●●●●○  semakin menjauh
+         * step 11: ●●●○○●●●  kereta kiri tiba di kanan & sebaliknya
+         * step 12: ●●○○○○●●  menghilang — 2 LED
+         * step 13: ●○○○○○○●  menghilang — 1 LED
+         */
+        static const uint8_t pat[14] = {
+            0x00, 0x81, 0xC3, 0xE7,  /* step  0- 3 */
+            0x7E, 0x3C, 0x18, 0x00,  /* step  4- 7 */
+            0x18, 0x3C, 0x7E, 0xE7,  /* step  8-11 */
+            0xC3, 0x81               /* step 12-13 */
+        };
+
+        uint32_t adc      = adc_dma_val;
+        uint32_t delay_ms = 500u - (adc * 450u / 4095u);  /* 500..50 ms */
+
+        set_leds(pat[train_step]);
+        HAL_Delay(delay_ms);
+
+        train_step = (train_step + 1u) % 14u;
+        break;
+      }
+
+      /* ----------------------------------------------------------
+       * MODE 5: Binary Counter 0–255 + Potensiometer -> kecepatan
+       * LED menampilkan nilai biner: bit-0 = LED1, bit-7 = LED8.
+       *   0   (0b00000000) -> semua LED mati
+       *   255 (0b11111111) -> semua LED nyala
+       * Setelah 255, counter kembali ke 0.
+       * Potensiometer: ADC makin besar -> delay makin kecil -> makin cepat.
+       *   ADC = 0    -> delay 500 ms (lambat)
+       *   ADC = 4095 -> delay  50 ms (cepat)
+       * ---------------------------------------------------------- */
+      case 5:
+      {
+        uint32_t adc      = adc_dma_val;
+        uint32_t delay_ms = 500u - (adc * 450u / 4095u);  /* 500..50 ms */
+
+        set_leds(binary_count);
+        HAL_Delay(delay_ms);
+
+        binary_count++;   /* uint8_t wraps 255 -> 0 secara otomatis */
         break;
       }
 
