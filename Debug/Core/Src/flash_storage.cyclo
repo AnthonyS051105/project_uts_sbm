@@ -1,0 +1,2 @@
+../Core/Src/flash_storage.c:6:10:FlashStorage_Read	3
+../Core/Src/flash_storage.c:15:6:FlashStorage_Write	5

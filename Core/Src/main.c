@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "rhythm_game.h"
 #include "charge_game.h"
+#include "whack_game.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -155,7 +156,7 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   /* Mulai ADC secara continuous via DMA; adc_dma_val diperbarui otomatis */
-  HAL_ADC_Start_DMA(&hadc1, &adc_dma_val, 1);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_dma_val, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -171,7 +172,7 @@ int main(void)
      * ============================================================ */
     if (simultaneous_flag) {
       simultaneous_flag = 0;
-      if (current_mode == 6 || current_mode == 7) {
+      if (current_mode >= 6 && current_mode <= 8) {
         /* Keluar dari mode game → kembali ke Mode 1 */
         current_mode  = 1;
         shift_pos     = 0;
@@ -181,6 +182,7 @@ int main(void)
         binary_count  = 0;
         RhythmGame_Reset();
         ChargeGame_Reset();
+        WhackGame_Reset();
         all_leds_off();
       } else {
         /* Masuk ke mode game 1 */
@@ -370,10 +372,19 @@ int main(void)
 
       /* ----------------------------------------------------------
        * MODE 7: Charge & Release Game (Fase 2)
-       * Keluar dengan menekan BTN1+BTN2 bersamaan kembali.
+       * Double click BTN1 berpindah ke MODE 8.
+       * Keluar dengan menekan BTN1+BTN2 bersamaan.
        * ---------------------------------------------------------- */
       case 7:
         ChargeGame_Run();
+        break;
+
+      /* ----------------------------------------------------------
+       * MODE 8: Whack-a-LED Game (Fase 3)
+       * Keluar dengan menekan BTN1+BTN2 bersamaan kembali.
+       * ---------------------------------------------------------- */
+      case 8:
+        WhackGame_Run();
         break;
 
       default:
@@ -589,9 +600,16 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         }
         RhythmGame_BTN1_Tap();
       } else if (current_mode == 7) {
-        /* Eksekusi polling pada mode 7, abaikan EXTI kecuali untuk mendeteksi double click? 
-         * Namun charge game menggunakan tahan, yang bisa salah diartikan sebagai double click 
-         * saat release dan ditekannya lambat. Kita biarkan poling mengambil alih hold */
+        if (diff < 400) {
+            /* Double click pada mode 7 untuk pindah ke mode 8 */
+            current_mode = 8;
+            ChargeGame_Reset();
+            all_leds_off();
+            WhackGame_Init();
+            return;
+        }
+      } else if (current_mode == 8) {
+        WhackGame_BTN1_Press();
       } else {
         btn1_flag = 1;
       }
@@ -609,7 +627,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
       } else if (current_mode == 6) {
         RhythmGame_BTN2_Press();
       } else if (current_mode == 7) {
-        /* Diurus oleh polling ChargeGame atau tambahkan EXTI */
+        ChargeGame_BTN2_Press();
+      } else if (current_mode == 8) {
+        WhackGame_BTN2_Press();
       } else {
         btn2_flag = 1;
       }
