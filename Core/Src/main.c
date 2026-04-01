@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "rhythm_game.h"
+#include "charge_game.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -170,7 +171,7 @@ int main(void)
      * ============================================================ */
     if (simultaneous_flag) {
       simultaneous_flag = 0;
-      if (current_mode == MODE_GAME) {
+      if (current_mode == 6 || current_mode == 7) {
         /* Keluar dari mode game → kembali ke Mode 1 */
         current_mode  = 1;
         shift_pos     = 0;
@@ -179,10 +180,11 @@ int main(void)
         train_step    = 0;
         binary_count  = 0;
         RhythmGame_Reset();
+        ChargeGame_Reset();
         all_leds_off();
       } else {
-        /* Masuk ke mode game */
-        current_mode = MODE_GAME;
+        /* Masuk ke mode game 1 */
+        current_mode = 6;
         all_leds_off();
         RhythmGame_Init();
       }
@@ -193,7 +195,7 @@ int main(void)
      * mode yang sama sebelum interrupt secara otomatis.
      * Hanya aktif di mode 1–5, TIDAK di mode game.
      * ============================================================ */
-    if (btn2_flag && current_mode != MODE_GAME) {
+    if (btn2_flag && current_mode < 6) {
       btn2_flag = 0;
       all_leds_on();
       HAL_Delay(5000);
@@ -204,7 +206,7 @@ int main(void)
      * BTN1: ganti mode  1 -> 2 -> 3 -> 4 -> 5 -> 1 -> ...
      * Hanya aktif di mode 1–5, TIDAK di mode game.
      * ============================================================ */
-    if (btn1_flag && current_mode != MODE_GAME) {
+    if (btn1_flag && current_mode < 6) {
       btn1_flag    = 0;
       current_mode = (current_mode % 5) + 1;
       shift_pos     = 0;
@@ -360,9 +362,18 @@ int main(void)
       /* ----------------------------------------------------------
        * MODE 6: Rhythm Tap Game (Fase 1)
        * Keluar dengan menekan BTN1+BTN2 bersamaan.
+       * Double click BTN1 berpindah ke MODE 7.
        * ---------------------------------------------------------- */
       case 6:
         RhythmGame_Run();
+        break;
+
+      /* ----------------------------------------------------------
+       * MODE 7: Charge & Release Game (Fase 2)
+       * Keluar dengan menekan BTN1+BTN2 bersamaan kembali.
+       * ---------------------------------------------------------- */
+      case 7:
+        ChargeGame_Run();
         break;
 
       default:
@@ -560,14 +571,27 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
   if (GPIO_Pin == BTN1_Pin) {
     if ((now - btn1_last_tick) > DEBOUNCE_MS) {
+      uint32_t diff = now - btn1_last_tick;
       btn1_last_tick = now;
 
       if ((now - btn2_last_tick) < SIMULTANEOUS_MS) {
         /* BTN2 baru saja ditekan → tekan bersamaan */
         btn2_flag = 0;
         simultaneous_flag = 1;
-      } else if (current_mode == MODE_GAME) {
+      } else if (current_mode == 6) {
+        if (diff < 400) {
+            /* Double click pada mode 6 untuk pindah ke mode 7 */
+            current_mode = 7;
+            RhythmGame_Reset();
+            all_leds_off();
+            ChargeGame_Init();
+            return;
+        }
         RhythmGame_BTN1_Tap();
+      } else if (current_mode == 7) {
+        /* Eksekusi polling pada mode 7, abaikan EXTI kecuali untuk mendeteksi double click? 
+         * Namun charge game menggunakan tahan, yang bisa salah diartikan sebagai double click 
+         * saat release dan ditekannya lambat. Kita biarkan poling mengambil alih hold */
       } else {
         btn1_flag = 1;
       }
@@ -582,8 +606,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         /* BTN1 baru saja ditekan → tekan bersamaan */
         btn1_flag = 0;
         simultaneous_flag = 1;
-      } else if (current_mode == MODE_GAME) {
+      } else if (current_mode == 6) {
         RhythmGame_BTN2_Press();
+      } else if (current_mode == 7) {
+        /* Diurus oleh polling ChargeGame atau tambahkan EXTI */
       } else {
         btn2_flag = 1;
       }
