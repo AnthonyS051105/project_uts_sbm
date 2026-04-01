@@ -40,7 +40,7 @@
 #define COUNTER_DELAY_MS 100   /* kecepatan counter Mode 2 (ms) */
 #define ADC_POLL_MS      50    /* polling ADC Mode 3 (ms)       */
 #define DEBOUNCE_MS      200   /* debounce tombol (ms)          */
-#define MODE_GAME        6     /* Mode game — aktif via tekan BTN1+BTN2 bersamaan */
+#define MODE_GAME        7     /* Mode game — aktif via tekan BTN1+BTN2 bersamaan */
 #define SIMULTANEOUS_MS  150   /* window waktu (ms) untuk deteksi tekan bersamaan */
 /* USER CODE END PD */
 
@@ -77,6 +77,10 @@ uint8_t train_step = 0;               /* langkah animasi kereta (0-2)       */
 
 /* ---- Mode 5: binary counter 0-255 ---- */
 uint8_t binary_count = 0;            /* nilai counter biner saat ini (0-255) */
+
+/* ---- Mode 6: LED pattern right shift ---- */
+uint8_t mode6_step = 0;
+uint8_t mode6_pattern = 0;
 
 /* ---- Mode Game: deteksi tekan bersamaan ---- */
 volatile uint8_t simultaneous_flag = 0; /* set jika BTN1+BTN2 ditekan bersamaan */
@@ -173,7 +177,7 @@ int main(void)
      * ============================================================ */
     if (simultaneous_flag) {
       simultaneous_flag = 0;
-      if (current_mode >= 6 && current_mode <= 9) {
+      if (current_mode >= 7 && current_mode <= 10) {
         /* Keluar dari mode game -> kembali ke Mode 1 */
         current_mode  = 1;
         shift_pos     = 0;
@@ -181,6 +185,8 @@ int main(void)
         counter_phase = 0;
         train_step    = 0;
         binary_count  = 0;
+        mode6_step    = 0;
+        mode6_pattern = 0;
         RhythmGame_Reset();
         ChargeGame_Reset();
         WhackGame_Reset();
@@ -188,7 +194,7 @@ int main(void)
         all_leds_off();
       } else {
         /* Masuk ke mode game 1 */
-        current_mode = 6;
+        current_mode = 7;
         all_leds_off();
         RhythmGame_Init();
       }
@@ -197,9 +203,9 @@ int main(void)
     /* ============================================================
      * BTN2 (INTERRUPT): semua LED nyala 5 detik, lalu kembali ke
      * mode yang sama sebelum interrupt secara otomatis.
-     * Hanya aktif di mode 1–5, TIDAK di mode game.
+     * Hanya aktif di mode 1–6, TIDAK di mode game.
      * ============================================================ */
-    if (btn2_flag && current_mode < 6) {
+    if (btn2_flag && current_mode < 7) {
       btn2_flag = 0;
       all_leds_on();
       HAL_Delay(5000);
@@ -207,17 +213,19 @@ int main(void)
     }
 
     /* ============================================================
-     * BTN1: ganti mode  1 -> 2 -> 3 -> 4 -> 5 -> 1 -> ...
-     * Hanya aktif di mode 1–5, TIDAK di mode game.
+     * BTN1: ganti mode  1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 1 -> ...
+     * Hanya aktif di mode 1–6, TIDAK di mode game.
      * ============================================================ */
-    if (btn1_flag && current_mode < 6) {
+    if (btn1_flag && current_mode < 7) {
       btn1_flag    = 0;
-      current_mode = (current_mode % 5) + 1;
+      current_mode = (current_mode % 6) + 1;
       shift_pos     = 0;
       counter_value = 0;
       counter_phase = 0;
       train_step    = 0;
       binary_count  = 0;
+      mode6_step    = 0;
+      mode6_pattern = 0;
       all_leds_off();
     }
 
@@ -364,37 +372,61 @@ int main(void)
       }
 
       /* ----------------------------------------------------------
-       * MODE 6: Rhythm Tap Game (Fase 1)
-       * Keluar dengan menekan BTN1+BTN2 bersamaan.
-       * Double click BTN1 berpindah ke MODE 7.
+       * MODE 6: LED Menyala Selang 2, Bergeser ke Kanan
+       * Visual:
+       * ●○○○○○○○ -> ○●○○○○○○ -> ○○●○○○○○ -> ●○○●○○○○ ...
+       * (di mana bit-0 = LED1, bit-7 = LED8)
        * ---------------------------------------------------------- */
       case 6:
+      {
+        uint32_t adc      = adc_dma_val;
+        uint32_t delay_ms = 500u - (adc * 450u / 4095u);  /* 500..50 ms */
+
+        if (mode6_step == 0) {
+          mode6_pattern = (mode6_pattern << 1) | 0x01u;
+        } else {
+          mode6_pattern = (mode6_pattern << 1);
+        }
+        
+        set_leds(mode6_pattern);
+        
+        mode6_step = (mode6_step + 1) % 3;
+        HAL_Delay(delay_ms);
+        break;
+      }
+
+      /* ----------------------------------------------------------
+       * MODE 7: Rhythm Tap Game (Fase 1)
+       * Keluar dengan menekan BTN1+BTN2 bersamaan.
+       * Double click BTN1 berpindah ke MODE 8.
+       * ---------------------------------------------------------- */
+      case 7:
         RhythmGame_Run();
         break;
 
       /* ----------------------------------------------------------
-       * MODE 7: Charge & Release Game (Fase 2)
-       * Double click BTN1 berpindah ke MODE 8.
-       * Keluar dengan menekan BTN1+BTN2 bersamaan.
-       * ---------------------------------------------------------- */
-      case 7:
-        ChargeGame_Run();
-        break;
-
-      /* ----------------------------------------------------------
-       * MODE 8: Whack-a-LED Game (Fase 3)
+       * MODE 8: Charge & Release Game (Fase 2)
        * Double click BTN1 berpindah ke MODE 9.
        * Keluar dengan menekan BTN1+BTN2 bersamaan.
        * ---------------------------------------------------------- */
       case 8:
+        ChargeGame_Run();
+        break;
+
+      /* ----------------------------------------------------------
+       * MODE 9: Whack-a-LED Game (Fase 3)
+       * Double click BTN1 berpindah ke MODE 10.
+       * Keluar dengan menekan BTN1+BTN2 bersamaan.
+       * ---------------------------------------------------------- */
+      case 9:
         WhackGame_Run();
         break;
 
       /* ----------------------------------------------------------
-       * MODE 9: Game Konversi Biner (Fase 4)
+       * MODE 10: Game Konversi Biner (Fase 4)
        * Keluar dengan menekan BTN1+BTN2 bersamaan.
        * ---------------------------------------------------------- */
-      case 9:
+      case 10:
         BinaryGame_Run();
         break;
 
@@ -600,39 +632,39 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         /* BTN2 baru saja ditekan → tekan bersamaan */
         btn2_flag = 0;
         simultaneous_flag = 1;
-      } else if (current_mode == 6) {
+      } else if (current_mode == 7) {
         if (diff < 400) {
-            /* Double click pada mode 6 untuk pindah ke mode 7 */
-            current_mode = 7;
+            /* Double click pada mode 7 untuk pindah ke mode 8 */
+            current_mode = 8;
             RhythmGame_Reset();
             all_leds_off();
             ChargeGame_Init();
             return;
         }
         RhythmGame_BTN1_Tap();
-      } else if (current_mode == 7) {
+      } else if (current_mode == 8) {
         if (diff < 400) {
-            /* Double click pada mode 7 untuk pindah ke mode 8 */
-            current_mode = 8;
+            /* Double click pada mode 8 untuk pindah ke mode 9 */
+            current_mode = 9;
             ChargeGame_Reset();
             all_leds_off();
             WhackGame_Init();
             return;
         }
-      } else if (current_mode == 8) {
+      } else if (current_mode == 9) {
         if (diff < 400) {
-            /* Double click pada mode 8 untuk pindah ke mode 9 */
-            current_mode = 9;
+            /* Double click pada mode 9 untuk pindah ke mode 10 */
+            current_mode = 10;
             WhackGame_Reset();
             all_leds_off();
             BinaryGame_Init();
             return;
         }
         WhackGame_BTN1_Press();
-      } else if (current_mode == 9) {
+      } else if (current_mode == 10) {
         if (diff < 400) {
-            /* Double click pada mode 9 untuk kembali ke mode 6 */
-            current_mode = 6;
+            /* Double click pada mode 10 untuk kembali ke mode 7 */
+            current_mode = 7;
             BinaryGame_Reset();
             all_leds_off();
             RhythmGame_Init();
@@ -653,13 +685,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         /* BTN1 baru saja ditekan → tekan bersamaan */
         btn1_flag = 0;
         simultaneous_flag = 1;
-      } else if (current_mode == 6) {
-        RhythmGame_BTN2_Press();
       } else if (current_mode == 7) {
-        ChargeGame_BTN2_Press();
+        RhythmGame_BTN2_Press();
       } else if (current_mode == 8) {
-        WhackGame_BTN2_Press();
+        ChargeGame_BTN2_Press();
       } else if (current_mode == 9) {
+        WhackGame_BTN2_Press();
+      } else if (current_mode == 10) {
         BinaryGame_BTN2_Press();
       } else {
         btn2_flag = 1;
