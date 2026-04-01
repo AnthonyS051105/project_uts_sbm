@@ -21,6 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <string.h>
 #include "rhythm_game.h"
 #include "charge_game.h"
 #include "whack_game.h"
@@ -52,6 +54,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
+
+UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 /* ---- kontrol mode ---- */
@@ -91,12 +95,18 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+int __io_putchar(int ch)
+{
+    HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
+    return ch;
+}
 
 /* Tabel urutan LED 1-8 (LED8 sebagai LSB/kanan, LED1 sebagai MSB/kiri) */
 typedef struct { GPIO_TypeDef *port; uint16_t pin; } LED_t;
@@ -159,6 +169,7 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_ADC1_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   /* Mulai ADC secara continuous via DMA; adc_dma_val diperbarui otomatis */
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_dma_val, 1);
@@ -447,6 +458,10 @@ int main(void)
         break;
     }
 
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%d,%lu,%lu\r\n", current_mode, counter_value, led_count);
+    HAL_UART_Transmit(&huart2, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
+
   }
   /* USER CODE END 3 */
 }
@@ -545,6 +560,39 @@ static void MX_ADC1_Init(void)
 }
 
 /**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -585,8 +633,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pins : BTN1_Pin BTN2_Pin */
   GPIO_InitStruct.Pin = BTN1_Pin|BTN2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;  /* button ke GND -> aktif LOW */
-  GPIO_InitStruct.Pull = GPIO_PULLUP;            /* pull-up internal */
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LED8_Pin LED4_Pin LED3_Pin LED2_Pin
@@ -609,8 +657,8 @@ static void MX_GPIO_Init(void)
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
