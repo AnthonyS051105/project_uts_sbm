@@ -24,6 +24,7 @@
 #include "rhythm_game.h"
 #include "charge_game.h"
 #include "whack_game.h"
+#include "binary_game.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -172,8 +173,8 @@ int main(void)
      * ============================================================ */
     if (simultaneous_flag) {
       simultaneous_flag = 0;
-      if (current_mode >= 6 && current_mode <= 8) {
-        /* Keluar dari mode game → kembali ke Mode 1 */
+      if (current_mode >= 6 && current_mode <= 9) {
+        /* Keluar dari mode game -> kembali ke Mode 1 */
         current_mode  = 1;
         shift_pos     = 0;
         counter_value = 0;
@@ -183,6 +184,7 @@ int main(void)
         RhythmGame_Reset();
         ChargeGame_Reset();
         WhackGame_Reset();
+        BinaryGame_Reset();
         all_leds_off();
       } else {
         /* Masuk ke mode game 1 */
@@ -381,10 +383,19 @@ int main(void)
 
       /* ----------------------------------------------------------
        * MODE 8: Whack-a-LED Game (Fase 3)
-       * Keluar dengan menekan BTN1+BTN2 bersamaan kembali.
+       * Double click BTN1 berpindah ke MODE 9.
+       * Keluar dengan menekan BTN1+BTN2 bersamaan.
        * ---------------------------------------------------------- */
       case 8:
         WhackGame_Run();
+        break;
+
+      /* ----------------------------------------------------------
+       * MODE 9: Game Konversi Biner (Fase 4)
+       * Keluar dengan menekan BTN1+BTN2 bersamaan.
+       * ---------------------------------------------------------- */
+      case 9:
+        BinaryGame_Run();
         break;
 
       default:
@@ -609,7 +620,25 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             return;
         }
       } else if (current_mode == 8) {
+        if (diff < 400) {
+            /* Double click pada mode 8 untuk pindah ke mode 9 */
+            current_mode = 9;
+            WhackGame_Reset();
+            all_leds_off();
+            BinaryGame_Init();
+            return;
+        }
         WhackGame_BTN1_Press();
+      } else if (current_mode == 9) {
+        if (diff < 400) {
+            /* Double click pada mode 9 untuk kembali ke mode 6 */
+            current_mode = 6;
+            BinaryGame_Reset();
+            all_leds_off();
+            RhythmGame_Init();
+            return;
+        }
+        BinaryGame_BTN1_Press();
       } else {
         btn1_flag = 1;
       }
@@ -630,6 +659,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         ChargeGame_BTN2_Press();
       } else if (current_mode == 8) {
         WhackGame_BTN2_Press();
+      } else if (current_mode == 9) {
+        BinaryGame_BTN2_Press();
       } else {
         btn2_flag = 1;
       }

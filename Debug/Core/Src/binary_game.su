@@ -1,0 +1,8 @@
+../Core/Src/binary_game.c:27:13:bg_set_leds	24	static
+../Core/Src/binary_game.c:37:13:BinaryGame_UART_Transmit	16	static
+../Core/Src/binary_game.c:42:13:send_to_website	80	static
+../Core/Src/binary_game.c:57:6:BinaryGame_Init	8	static
+../Core/Src/binary_game.c:63:6:BinaryGame_Run	4	static
+../Core/Src/binary_game.c:68:6:BinaryGame_Reset	8	static
+../Core/Src/binary_game.c:74:6:BinaryGame_BTN1_Press	8	static
+../Core/Src/binary_game.c:82:6:BinaryGame_BTN2_Press	8	static

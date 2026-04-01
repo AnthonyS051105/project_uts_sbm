@@ -1,0 +1,8 @@
+../Core/Src/binary_game.c:27:13:bg_set_leds	2
+../Core/Src/binary_game.c:37:13:BinaryGame_UART_Transmit	1
+../Core/Src/binary_game.c:42:13:send_to_website	3
+../Core/Src/binary_game.c:57:6:BinaryGame_Init	1
+../Core/Src/binary_game.c:63:6:BinaryGame_Run	1
+../Core/Src/binary_game.c:68:6:BinaryGame_Reset	1
+../Core/Src/binary_game.c:74:6:BinaryGame_BTN1_Press	1
+../Core/Src/binary_game.c:82:6:BinaryGame_BTN2_Press	1
