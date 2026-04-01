@@ -65,7 +65,7 @@ uint8_t  counter_phase = 0;           /* 0 = NIM sendiri, 1 = NIM partner   */
 
 /* ---- Mode 3: ADC -> LED (dipantau Cube Monitor - Gauge) ---- */
 volatile uint32_t adc_dma_val = 0;    /* buffer DMA hasil ADC               */
-uint32_t led_count   = 0;            /* jumlah LED menyala (0-8)           */
+volatile uint32_t led_count   = 0;    /* jumlah LED menyala (0-8)           */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -236,19 +236,19 @@ int main(void)
       {
         uint32_t adc = adc_dma_val;
 
-        if (adc == 0) {
+        if (adc <= 10) {
           led_count = 0;
-        } else if (adc >= 895) {
+        } else if (adc >= 4000) {
           led_count = 8;
         } else {
-          led_count = (adc * 8u) / 895u;
-          if (led_count == 0) led_count = 1;   /* minimal 1 jika adc > 0 */
+          led_count = (adc * 8u) / 4095u;
+          if (led_count == 0) led_count = 1; 
         }
 
-        /* Nyalakan led_count LED berturut-turut dari LED1 */
-        uint8_t pattern = (led_count >= 8) ? 0xFFu
-                                           : (uint8_t)((1u << led_count) - 1u);
+        /* Konversi jumlah led_count menjadi bit pattern (00000001, 00000011, dst) */
+        uint8_t pattern = (led_count >= 8) ? 0xFFu : (uint8_t)((1u << led_count) - 1u);
         set_leds(pattern);
+        
         HAL_Delay(ADC_POLL_MS);
         break;
       }
