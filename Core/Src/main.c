@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "rhythm_game.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,6 +37,8 @@
 #define COUNTER_DELAY_MS 100   /* kecepatan counter Mode 2 (ms) */
 #define ADC_POLL_MS      50    /* polling ADC Mode 3 (ms)       */
 #define DEBOUNCE_MS      200   /* debounce tombol (ms)          */
+#define MODE_GAME        6     /* Mode game — aktif via tekan BTN1+BTN2 bersamaan */
+#define SIMULTANEOUS_MS  150   /* window waktu (ms) untuk deteksi tekan bersamaan */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -72,6 +74,9 @@ uint8_t train_step = 0;               /* langkah animasi kereta (0-2)       */
 
 /* ---- Mode 5: binary counter 0-255 ---- */
 uint8_t binary_count = 0;            /* nilai counter biner saat ini (0-255) */
+
+/* ---- Mode Game: deteksi tekan bersamaan ---- */
+volatile uint8_t simultaneous_flag = 0; /* set jika BTN1+BTN2 ditekan bersamaan */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -161,23 +166,46 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
     /* ============================================================
+     * BTN1 + BTN2 bersamaan: toggle Mode Game
+     * ============================================================ */
+    if (simultaneous_flag) {
+      simultaneous_flag = 0;
+      if (current_mode == MODE_GAME) {
+        /* Keluar dari mode game → kembali ke Mode 1 */
+        current_mode  = 1;
+        shift_pos     = 0;
+        counter_value = 0;
+        counter_phase = 0;
+        train_step    = 0;
+        binary_count  = 0;
+        RhythmGame_Reset();
+        all_leds_off();
+      } else {
+        /* Masuk ke mode game */
+        current_mode = MODE_GAME;
+        all_leds_off();
+        RhythmGame_Init();
+      }
+    }
+
+    /* ============================================================
      * BTN2 (INTERRUPT): semua LED nyala 5 detik, lalu kembali ke
      * mode yang sama sebelum interrupt secara otomatis.
-     * State mode TIDAK direset agar melanjutkan dari posisi terakhir.
+     * Hanya aktif di mode 1–5, TIDAK di mode game.
      * ============================================================ */
-    if (btn2_flag) {
+    if (btn2_flag && current_mode != MODE_GAME) {
       btn2_flag = 0;
       all_leds_on();
       HAL_Delay(5000);
       all_leds_off();
-      /* Tidak ada reset state — mode melanjutkan dari posisi terakhir */
     }
 
     /* ============================================================
-     * BTN1: ganti mode  1 -> 2 -> 3 -> 1 -> ...
+     * BTN1: ganti mode  1 -> 2 -> 3 -> 4 -> 5 -> 1 -> ...
+     * Hanya aktif di mode 1–5, TIDAK di mode game.
      * ============================================================ */
-    if (btn1_flag) {
-      btn1_flag   = 0;
+    if (btn1_flag && current_mode != MODE_GAME) {
+      btn1_flag    = 0;
       current_mode = (current_mode % 5) + 1;
       shift_pos     = 0;
       counter_value = 0;
@@ -328,6 +356,14 @@ int main(void)
         binary_count++;   /* uint8_t wraps 255 -> 0 secara otomatis */
         break;
       }
+
+      /* ----------------------------------------------------------
+       * MODE 6: Rhythm Tap Game (Fase 1)
+       * Keluar dengan menekan BTN1+BTN2 bersamaan.
+       * ---------------------------------------------------------- */
+      case 6:
+        RhythmGame_Run();
+        break;
 
       default:
         current_mode = 1;
@@ -508,8 +544,15 @@ static void MX_GPIO_Init(void)
 
 /**
  * Callback EXTI (dipanggil oleh HAL_GPIO_EXTI_IRQHandler di stm32f4xx_it.c).
- * BTN1 (PA1) : set flag ganti mode, debounce 200 ms.
- * BTN2 (PA2) : set flag interrupt 5 detik, debounce 200 ms.
+ *
+ * Logika tekan bersamaan (simultaneous):
+ *   Jika BTN1 ditekan dan BTN2 sudah ditekan dalam SIMULTANEOUS_MS ms terakhir
+ *   (atau sebaliknya), set simultaneous_flag dan batalkan flag tombol tunggal.
+ *   Ini memungkinkan toggle Mode Game tanpa salah terpicu sebagai mode-change.
+ *
+ * Di Mode Game (current_mode == MODE_GAME):
+ *   BTN1 → RhythmGame_BTN1_Tap()   (rekam timestamp ketukan)
+ *   BTN2 → RhythmGame_BTN2_Press() (set flag ulang demo / hint)
  */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -518,14 +561,32 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if (GPIO_Pin == BTN1_Pin) {
     if ((now - btn1_last_tick) > DEBOUNCE_MS) {
       btn1_last_tick = now;
-      btn1_flag = 1;
+
+      if ((now - btn2_last_tick) < SIMULTANEOUS_MS) {
+        /* BTN2 baru saja ditekan → tekan bersamaan */
+        btn2_flag = 0;
+        simultaneous_flag = 1;
+      } else if (current_mode == MODE_GAME) {
+        RhythmGame_BTN1_Tap();
+      } else {
+        btn1_flag = 1;
+      }
     }
   }
 
   if (GPIO_Pin == BTN2_Pin) {
     if ((now - btn2_last_tick) > DEBOUNCE_MS) {
       btn2_last_tick = now;
-      btn2_flag = 1;
+
+      if ((now - btn1_last_tick) < SIMULTANEOUS_MS) {
+        /* BTN1 baru saja ditekan → tekan bersamaan */
+        btn1_flag = 0;
+        simultaneous_flag = 1;
+      } else if (current_mode == MODE_GAME) {
+        RhythmGame_BTN2_Press();
+      } else {
+        btn2_flag = 1;
+      }
     }
   }
 }
