@@ -98,17 +98,17 @@ static void MX_ADC1_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/* Tabel urutan LED 1-8 */
+/* Tabel urutan LED 1-8 (LED8 sebagai LSB/kanan, LED1 sebagai MSB/kiri) */
 typedef struct { GPIO_TypeDef *port; uint16_t pin; } LED_t;
 static const LED_t leds[8] = {
-    {LED1_GPIO_Port, LED1_Pin},
-    {LED2_GPIO_Port, LED2_Pin},
-    {LED3_GPIO_Port, LED3_Pin},
-    {LED4_GPIO_Port, LED4_Pin},
-    {LED5_GPIO_Port, LED5_Pin},
-    {LED6_GPIO_Port, LED6_Pin},
-    {LED7_GPIO_Port, LED7_Pin},
-    {LED8_GPIO_Port, LED8_Pin},
+    {LED8_GPIO_Port, LED8_Pin}, /* bit 0 */
+    {LED7_GPIO_Port, LED7_Pin}, /* bit 1 */
+    {LED6_GPIO_Port, LED6_Pin}, /* bit 2 */
+    {LED5_GPIO_Port, LED5_Pin}, /* bit 3 */
+    {LED4_GPIO_Port, LED4_Pin}, /* bit 4 */
+    {LED3_GPIO_Port, LED3_Pin}, /* bit 5 */
+    {LED2_GPIO_Port, LED2_Pin}, /* bit 6 */
+    {LED1_GPIO_Port, LED1_Pin}, /* bit 7 */
 };
 
 /**
@@ -241,9 +241,10 @@ int main(void)
        * ---------------------------------------------------------- */
       case 1:
       {
-        /* step 0-7: LED1..LED8 menyala satu per satu
+        /* step 0-7: LED8..LED1 menyala satu per satu (Bergeser dari kanan ke kiri)
          * step 8  : semua mati, lalu mulai ulang */
         if (shift_pos < 8) {
+          /* LED8 ada di LSB (0x01), bergeser ke kiri hingga LED1 (0x80) */
           set_leds((uint8_t)(1u << shift_pos));
         } else {
           set_leds(0x00);
@@ -284,19 +285,26 @@ int main(void)
        * ---------------------------------------------------------- */
       case 3:
       {
-        uint32_t adc = adc_dma_val;
+        static uint32_t filtered_adc = 0;
+        /* Filtering (Exponential Moving Average) untuk menstabilkan pembacaan adc */
+        filtered_adc = (filtered_adc * 7 + adc_dma_val) / 8;
+        
+        /* Putar kanan = ADC menurun = LED bertambah, maka kita invert nilainya. */
+        uint32_t logical_adc = 4095 - filtered_adc;
 
-        if (adc <= 10) {
+        /* Deadzone bawah dinaikkan dari 10 ke 100 untuk menghilangkan noise bawah sehingga kiri bisa mati */
+        if (logical_adc <= 100) {
           led_count = 0;
-        } else if (adc >= 4000) {
+        } else if (logical_adc >= 4000) {
           led_count = 8;
         } else {
-          led_count = (adc * 8u) / 4095u;
+          led_count = (logical_adc * 8u) / 4095u;
           if (led_count == 0) led_count = 1; 
         }
 
-        /* Konversi jumlah led_count menjadi bit pattern (00000001, 00000011, dst) */
-        uint8_t pattern = (led_count >= 8) ? 0xFFu : (uint8_t)((1u << led_count) - 1u);
+        /* Konversi led_count ke pattern dari kiri (LED1, MSB) merayap ke kanan.
+         * Misal: count 1 = 0x80 (10000000), count 2 = 0xC0 (11000000) */
+        uint8_t pattern = (led_count == 0) ? 0x00 : (uint8_t)(0xFF00u >> led_count);
         set_leds(pattern);
         
         HAL_Delay(ADC_POLL_MS);
@@ -340,7 +348,8 @@ int main(void)
         };
 
         uint32_t adc      = adc_dma_val;
-        uint32_t delay_ms = 500u - (adc * 450u / 4095u);  /* 500..50 ms */
+        /* Putar kanan = ADC turun = delay memendek (semakin cepat) */
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);  /* 50..500 ms */
 
         set_leds(pat[train_step]);
         HAL_Delay(delay_ms);
@@ -362,7 +371,8 @@ int main(void)
       case 5:
       {
         uint32_t adc      = adc_dma_val;
-        uint32_t delay_ms = 500u - (adc * 450u / 4095u);  /* 500..50 ms */
+        /* Putar kanan = ADC turun = delay memendek (semakin cepat) */
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);  /* 50..500 ms */
 
         set_leds(binary_count);
         HAL_Delay(delay_ms);
@@ -380,12 +390,14 @@ int main(void)
       case 6:
       {
         uint32_t adc      = adc_dma_val;
-        uint32_t delay_ms = 500u - (adc * 450u / 4095u);  /* 500..50 ms */
+        /* Putar kanan = ADC turun = delay memendek (semakin cepat) */
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);  /* 50..500 ms */
 
+        /* Shift ke kanan (menjauhi MSB/LED1) agar secara visual bergerak dari LED1 ke LED8 */
         if (mode6_step == 0) {
-          mode6_pattern = (mode6_pattern << 1) | 0x01u;
+          mode6_pattern = (mode6_pattern >> 1) | 0x80u;
         } else {
-          mode6_pattern = (mode6_pattern << 1);
+          mode6_pattern = (mode6_pattern >> 1);
         }
         
         set_leds(mode6_pattern);
