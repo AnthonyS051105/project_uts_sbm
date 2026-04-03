@@ -58,11 +58,6 @@ DMA_HandleTypeDef hdma_adc1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-uint8_t uart_rx_buf[32];
-volatile uint8_t uart_rx_ready = 0;
-uint8_t uart_rx_line[32];
-uint8_t uart_rx_idx = 0;
-
 /* ---- kontrol mode ---- */
 volatile uint8_t current_mode  = 1;   /* mode aktif: 1, 2, atau 3          */
 volatile uint8_t btn1_flag     = 0;   /* set oleh EXTI BTN1                 */
@@ -93,8 +88,6 @@ uint8_t mode6_pattern = 0;
 
 /* ---- Mode Game: deteksi tekan bersamaan ---- */
 volatile uint8_t simultaneous_flag = 0; /* set jika BTN1+BTN2 ditekan bersamaan */
-volatile uint32_t game_score = 0;       /* skor game, bisa dipantau di Cube Monitor */
-volatile uint32_t game_lives = 3;       /* nyawa game, bisa dipantau di Cube Monitor */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -113,41 +106,6 @@ int __io_putchar(int ch)
 {
     HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
     return ch;
-}
-
-static void process_uart_command(const char *cmd) {
-  if (strncmp(cmd, "CMD:MODE:", 9) == 0) {
-    int m = atoi(cmd + 9);
-    if (m >= 1 && m <= 10) {
-      current_mode = m;
-      all_leds_off();
-    }
-  } else if (strcmp(cmd, "CMD:ISR") == 0) {
-    /* Simulasi ISR: nyalakan semua LED 5 detik */
-    all_leds_on();
-    HAL_Delay(5000);
-    all_leds_off();
-  } else if (strcmp(cmd, "CMD:LED:FF") == 0) {
-    all_leds_on();
-  } else if (strcmp(cmd, "CMD:LED:00") == 0) {
-    all_leds_off();
-  } else if (strcmp(cmd, "CMD:RESET") == 0) {
-    game_score = 0;
-    game_lives = 3;
-  } else if (strcmp(cmd, "CMD:BTN1") == 0) {
-    btn1_flag = 1;
-  } else if (strcmp(cmd, "CMD:BTN2") == 0) {
-    btn2_flag = 1;
-  }
-}
-
-static uint8_t get_led_mask(void) {
-  uint8_t mask = 0;
-  for (int i = 0; i < 8; i++) {
-    if (HAL_GPIO_ReadPin(leds[i].port, leds[i].pin) == GPIO_PIN_SET)
-      mask |= (1u << i);
-  }
-  return mask;
 }
 
 /* Tabel urutan LED 1-8 (LED8 sebagai LSB/kanan, LED1 sebagai MSB/kiri) */
@@ -215,7 +173,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   /* Mulai ADC secara continuous via DMA; adc_dma_val diperbarui otomatis */
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_dma_val, 1);
-  HAL_UART_Receive_IT(&huart2, uart_rx_buf, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -501,18 +458,8 @@ int main(void)
         break;
     }
 
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer),
-      "%d,%lu,%lu,0x%02X,%lu,%d,%d\r\n",
-      current_mode,
-      counter_value,
-      led_count,
-      (unsigned)get_led_mask(),   /* fungsi helper di bawah */
-      adc_dma_val,
-      game_score,                 /* tambahkan variabel ini */
-      game_lives                  /* tambahkan variabel ini */
-    );
-HAL_UART_Transmit(&huart2, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%d,%lu,%lu\r\n", current_mode, counter_value, led_count);
     HAL_UART_Transmit(&huart2, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
 
   }
@@ -719,22 +666,6 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-  if (huart->Instance == USART2) {
-    char c = (char)uart_rx_buf[0];
-    if (c == '\n') {
-      uart_rx_line[uart_rx_idx] = '\0';
-      /* Hapus '\r' jika ada */
-      if (uart_rx_idx > 0 && uart_rx_line[uart_rx_idx-1] == '\r')
-        uart_rx_line[--uart_rx_idx] = '\0';
-      process_uart_command((char*)uart_rx_line);
-      uart_rx_idx = 0;
-    } else if (uart_rx_idx < sizeof(uart_rx_line) - 1) {
-      uart_rx_line[uart_rx_idx++] = c;
-    }
-    HAL_UART_Receive_IT(&huart2, uart_rx_buf, 1);
-  }
-}
 
 /**
  * Callback EXTI (dipanggil oleh HAL_GPIO_EXTI_IRQHandler di stm32f4xx_it.c).
