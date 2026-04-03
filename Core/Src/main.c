@@ -470,9 +470,23 @@ int main(void)
         break;
     }
 
-    char buffer[64];
-    snprintf(buffer, sizeof(buffer), "%d,%lu,%lu\r\n", current_mode, counter_value, led_count);
-    HAL_UART_Transmit(&huart2, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
+    // Siapkan buffer yang lebih besar untuk menampung semua data
+    char buffer[150];
+
+    // Memformat semua variabel penting ke dalam satu teks yang rapi
+    uint16_t len = snprintf(buffer, sizeof(buffer),
+      "Mode: %d | ADC: %lu | Cnt: %lu | LEDs: %lu | Shift: %d | Train: %d | Bin: %d | M6_Pat: %02X\r\n",
+      current_mode,
+      adc_dma_val,
+      counter_value,
+      led_count,
+      shift_pos,
+      train_step,
+      binary_count,
+      mode6_pattern);
+
+    // Kirim data menggunakan USB CDC (Bukan UART2)
+    CDC_Transmit_FS((uint8_t*)buffer, len);
 
   }
   /* USER CODE END 3 */
