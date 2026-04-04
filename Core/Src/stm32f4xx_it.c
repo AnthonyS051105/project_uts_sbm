@@ -22,7 +22,6 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "whack_game.h"
 #include "dht.h"
 /* USER CODE END Includes */
 

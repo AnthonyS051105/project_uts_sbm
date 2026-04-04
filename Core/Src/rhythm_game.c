@@ -67,6 +67,45 @@ RhythmGame_t rg;
 static volatile uint8_t rg_btn2_flag = 0;
 
 /* ================================================================== *
+ *  Buzzer helpers                                                      *
+ * ================================================================== */
+
+/** Buzzer ON selama on_ms lalu OFF. */
+static void buzzer_beep(uint32_t on_ms)
+{
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+    HAL_Delay(on_ms);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+}
+
+/**
+ * Bunyi BENAR — 2 beep pendek cepat (riang/ascending feel).
+ *   Beep 1: 80 ms → jeda 60 ms → Beep 2: 120 ms
+ */
+static void buzzer_correct_perfect(void)
+{
+    buzzer_beep(80);
+    HAL_Delay(60);
+    buzzer_beep(120);
+}
+
+/**
+ * Bunyi HAMPIR BENAR (NEAR) — 1 beep sedang.
+ */
+static void buzzer_correct_near(void)
+{
+    buzzer_beep(200);
+}
+
+/**
+ * Bunyi SALAH/MISS — 1 beep panjang berat.
+ */
+static void buzzer_wrong(void)
+{
+    buzzer_beep(500);
+}
+
+/* ================================================================== *
  *  Fungsi internal                                                     *
  * ================================================================== */
 
@@ -93,16 +132,30 @@ static void rg_play_demo(void)
     }
 }
 
-/** Sinyal siap: semua LED berkedip 3×300ms, jeda 500ms. */
+/**
+ * Sinyal siap: hitung mundur "3 - 2 - 1 - GO!" dengan LED + buzzer.
+ *   Setiap hitungan: LED ON + beep pendek 100 ms → LED OFF → jeda 700 ms
+ *   "GO!": LED ON + beep panjang 400 ms → LED OFF → jeda 200 ms
+ */
 static void rg_ready_signal(void)
 {
+    /* "3", "2", "1" */
     for (int i = 0; i < 3; i++) {
         rg_set_leds(0xFF);
-        HAL_Delay(300);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+        HAL_Delay(100);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+        HAL_Delay(200);     /* LED masih nyala 200 ms lagi */
         rg_set_leds(0x00);
-        HAL_Delay(300);
+        HAL_Delay(500);     /* jeda sebelum hitungan berikutnya */
     }
-    HAL_Delay(500);
+    /* "GO!" */
+    rg_set_leds(0xFF);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+    HAL_Delay(400);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+    rg_set_leds(0x00);
+    HAL_Delay(200);
 }
 
 /**
@@ -175,27 +228,29 @@ static void rg_show_feedback(void)
 {
     for (uint8_t i = 0; i < rg.pat_len; i++) {
         switch (rg_classify(rg.tap_err[i])) {
-            case 0:  /* PERFECT */
+            case 0:  /* PERFECT — LED solid + 2 beep cepat naik (riang) */
                 rg_set_leds(0xFF);
-                HAL_Delay(400);
+                buzzer_correct_perfect();   /* 80 ms + 60 ms gap + 120 ms = 260 ms */
+                HAL_Delay(140);             /* total LED on ≈ 400 ms */
                 rg_set_leds(0x00);
                 HAL_Delay(100);
                 break;
-            case 1:  /* NEAR */
+            case 1:  /* NEAR — alternating LED + 1 beep sedang */
                 for (int j = 0; j < 2; j++) {
                     rg_set_leds(0x55);
                     HAL_Delay(150);
                     rg_set_leds(0xAA);
                     HAL_Delay(150);
                 }
+                buzzer_correct_near();      /* 200 ms */
                 rg_set_leds(0x00);
                 HAL_Delay(50);
                 break;
-            default: /* MISS */
+            default: /* MISS — flash LED + beep panjang berat */
                 rg_set_leds(0xFF);
-                HAL_Delay(200);
+                buzzer_wrong();             /* 500 ms */
                 rg_set_leds(0x00);
-                HAL_Delay(300);
+                HAL_Delay(100);
                 break;
         }
     }
@@ -206,14 +261,18 @@ static void rg_show_feedback(void)
     rg_set_leds(0x00);
 }
 
-/** Animasi level up: N LED (sesuai level baru) berkedip ×3. */
+/** Animasi level up: N LED berkedip ×3 + buzzer ascending (3 beep naik durasi). */
 static void rg_level_up_anim(void)
 {
     uint8_t pat = (rg.level >= 8u) ? 0xFF
                 : (uint8_t)((1u << rg.level) - 1u);
+    uint32_t beep_dur[3] = {80, 120, 200}; /* durasi naik = ascending feel */
     for (int i = 0; i < 3; i++) {
         rg_set_leds(pat);
-        HAL_Delay(300);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+        HAL_Delay(beep_dur[i]);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+        HAL_Delay(300 - beep_dur[i]);   /* sisa LED on */
         rg_set_leds(0x00);
         HAL_Delay(300);
     }
@@ -223,12 +282,23 @@ static void rg_level_up_anim(void)
 /**
  * Animasi game over: semua LED menyala → padam kanan ke kiri →
  * skor biner tampil 3 detik.
+ * Buzzer: 3 beep descending (panjang → pendek) lalu hening.
  */
 static void rg_game_over_anim(void)
 {
-    rg_set_leds(0xFF);
-    HAL_Delay(500);
+    /* 3 beep descending sebagai penanda kalah */
+    uint32_t beep_dur[3] = {400, 250, 100};
+    for (int i = 0; i < 3; i++) {
+        rg_set_leds(0xFF);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+        HAL_Delay(beep_dur[i]);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+        rg_set_leds(0x00);
+        HAL_Delay(150);
+    }
+    HAL_Delay(200);
 
+    /* Animasi padam kanan ke kiri */
     uint8_t pat = 0xFF;
     for (int i = 7; i >= 0; i--) {
         pat &= (uint8_t)~(1u << i);

@@ -26,8 +26,6 @@
 #include <stdio.h>
 #include <string.h>
 #include "rhythm_game.h"
-#include "charge_game.h"
-#include "whack_game.h"
 #include "binary_game.h"
 #include "dht.h"
 /* USER CODE END Includes */
@@ -127,6 +125,12 @@ static void MX_TIM2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/* Override BinaryGame_UART_Transmit → kirim via USB CDC */
+void BinaryGame_UART_Transmit(const char *buf, uint16_t len)
+{
+    CDC_Transmit_FS((uint8_t*)buf, len);
+}
 
 /* Tabel urutan LED 1-8 (LED8 sebagai LSB/kanan, LED1 sebagai MSB/kiri) */
 typedef struct { GPIO_TypeDef *port; uint16_t pin; } LED_t;
@@ -351,7 +355,7 @@ int main(void)
      * ============================================================ */
     if (simultaneous_flag) {
       simultaneous_flag = 0;
-      if (current_mode >= 7 && current_mode <= 10) {
+      if (current_mode >= 7 && current_mode <= 8) {
         /* Keluar dari mode game -> kembali ke Mode 1 */
         current_mode  = 1;
         shift_pos     = 0;
@@ -362,8 +366,6 @@ int main(void)
         mode6_step    = 0;
         mode6_pattern = 0;
         RhythmGame_Reset();
-        ChargeGame_Reset();
-        WhackGame_Reset();
         BinaryGame_Reset();
         all_leds_off();
       } else {
@@ -553,28 +555,11 @@ int main(void)
         break;
 
       /* ----------------------------------------------------------
-       * MODE 8: Charge & Release Game (Fase 2)
-       * Double click BTN1 berpindah ke MODE 9.
+       * MODE 8: Game Konversi Biner (Fase 2)
+       * Double click BTN1 berpindah kembali ke MODE 7.
        * Keluar dengan menekan BTN1+BTN2 bersamaan.
        * ---------------------------------------------------------- */
       case 8:
-        ChargeGame_Run();
-        break;
-
-      /* ----------------------------------------------------------
-       * MODE 9: Whack-a-LED Game (Fase 3)
-       * Double click BTN1 berpindah ke MODE 10.
-       * Keluar dengan menekan BTN1+BTN2 bersamaan.
-       * ---------------------------------------------------------- */
-      case 9:
-        WhackGame_Run();
-        break;
-
-      /* ----------------------------------------------------------
-       * MODE 10: Game Konversi Biner (Fase 4)
-       * Keluar dengan menekan BTN1+BTN2 bersamaan.
-       * ---------------------------------------------------------- */
-      case 10:
         BinaryGame_Run();
         break;
 
@@ -988,32 +973,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             current_mode = 8;
             RhythmGame_Reset();
             all_leds_off();
-            ChargeGame_Init();
+            BinaryGame_Init();
             return;
         }
         RhythmGame_BTN1_Tap();
       } else if (current_mode == 8) {
         if (diff < 400) {
-            /* Double click pada mode 8 untuk pindah ke mode 9 */
-            current_mode = 9;
-            ChargeGame_Reset();
-            all_leds_off();
-            WhackGame_Init();
-            return;
-        }
-      } else if (current_mode == 9) {
-        if (diff < 400) {
-            /* Double click pada mode 9 untuk pindah ke mode 10 */
-            current_mode = 10;
-            WhackGame_Reset();
-            all_leds_off();
-            BinaryGame_Init();
-            return;
-        }
-        WhackGame_BTN1_Press();
-      } else if (current_mode == 10) {
-        if (diff < 400) {
-            /* Double click pada mode 10 untuk kembali ke mode 7 */
+            /* Double click pada mode 8 untuk kembali ke mode 7 */
             current_mode = 7;
             BinaryGame_Reset();
             all_leds_off();
@@ -1038,10 +1004,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
       } else if (current_mode == 7) {
         RhythmGame_BTN2_Press();
       } else if (current_mode == 8) {
-        ChargeGame_BTN2_Press();
-      } else if (current_mode == 9) {
-        WhackGame_BTN2_Press();
-      } else if (current_mode == 10) {
         BinaryGame_BTN2_Press();
       } else {
         btn2_flag = 1;

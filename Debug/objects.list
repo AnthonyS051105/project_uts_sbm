@@ -1,5 +1,4 @@
 "./Core/Src/binary_game.o"
-"./Core/Src/charge_game.o"
 "./Core/Src/dht.o"
 "./Core/Src/flash_storage.o"
 "./Core/Src/main.o"
@@ -9,7 +8,6 @@
 "./Core/Src/syscalls.o"
 "./Core/Src/sysmem.o"
 "./Core/Src/system_stm32f4xx.o"
-"./Core/Src/whack_game.o"
 "./Core/Startup/startup_stm32f401ccux.o"
 "./Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.o"
 "./Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_adc.o"
