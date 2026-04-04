@@ -43,9 +43,10 @@
 #define COUNTER_DELAY_MS 100   /* kecepatan counter Mode 2 (ms) */
 #define ADC_POLL_MS      50    /* polling ADC Mode 3 (ms)       */
 #define DEBOUNCE_MS      200   /* debounce tombol (ms)          */
-#define MODE_GAME        7     /* Mode game — aktif via tekan BTN1+BTN2 bersamaan */
+#define MODE_GAME        8     /* Mode game — aktif via tekan BTN1+BTN2 bersamaan */
 #define SIMULTANEOUS_MS  150   /* window waktu (ms) untuk deteksi tekan bersamaan */
-#define MODE_LOBBY       9     /* Mode lobby pemilihan game */
+#define MODE_LOBBY       10    /* Mode lobby pemilihan game */
+#define SERVO_POT_MS     20    /* interval update servo dari potensiometer (ms)   */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -255,27 +256,20 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-    /* ============================================================
-     * Kontrol Servo SG90 (0° -> 90° -> 180°) tanpa HAL_Delay
-     * Menggunakan polling HAL_GetTick() dengan jeda 1000ms (1 detik)
-     * ============================================================ */
     uint32_t current_tick = HAL_GetTick();
-    if ((current_tick - servo_last_tick) >= 1000) {
-      servo_last_tick = current_tick; // Update waktu terakhir
 
-      switch (servo_step) {
-        case 0:
-          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 500);  // Posisi ~0 derajat
-          servo_step = 1;
-          break;
-        case 1:
-          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 1500); // Posisi ~90 derajat
-          servo_step = 2;
-          break;
-        case 2:
-          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 2500); // Posisi ~180 derajat
-          servo_step = 0;
-          break;
+    /* ============================================================
+     * Kontrol Servo SG90 otomatis (0° -> 90° -> 180°) — Mode 1–6
+     * Non-blocking, jeda 1 detik antar posisi.
+     * ============================================================ */
+    if (current_mode < 7) {
+      if ((current_tick - servo_last_tick) >= 1000) {
+        servo_last_tick = current_tick;
+        switch (servo_step) {
+          case 0: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 500);  servo_step = 1; break;
+          case 1: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 1500); servo_step = 2; break;
+          case 2: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 2500); servo_step = 0; break;
+        }
       }
     }
 
@@ -358,7 +352,7 @@ int main(void)
      * ============================================================ */
     if (simultaneous_flag) {
       simultaneous_flag = 0;
-      if (current_mode >= 7) {
+      if (current_mode >= 8) {
         /* Keluar dari mode game/lobby -> kembali ke Mode 1 */
         current_mode       = 1;
         game_lobby         = 0;
@@ -387,7 +381,7 @@ int main(void)
      * mode yang sama sebelum interrupt secara otomatis.
      * Hanya aktif di mode 1–6, TIDAK di mode game.
      * ============================================================ */
-    if (btn2_flag && current_mode < 7) {
+    if (btn2_flag && current_mode < 8) {
       btn2_flag = 0;
       all_leds_on();
       HAL_Delay(5000);
@@ -398,9 +392,9 @@ int main(void)
      * BTN1: ganti mode  1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 1 -> ...
      * Hanya aktif di mode 1–6, TIDAK di mode game.
      * ============================================================ */
-    if (btn1_flag && current_mode < 7) {
+    if (btn1_flag && current_mode < 8) {
       btn1_flag    = 0;
-      current_mode = (current_mode % 6) + 1;
+      current_mode = (current_mode % 7) + 1;
       shift_pos     = 0;
       counter_value = 0;
       counter_phase = 0;
@@ -449,10 +443,10 @@ int main(void)
 
       /* Jalankan game yang dipilih */
       if (sel == 1) {
-        current_mode = 7;
+        current_mode = 8;
         RhythmGame_Init();
       } else {
-        current_mode = 8;
+        current_mode = 9;
         BinaryGame_Init();
       }
     }
@@ -598,28 +592,57 @@ int main(void)
       }
 
       /* ----------------------------------------------------------
-       * MODE 7: Rhythm Tap Game (Fase 1)
-       * Keluar dengan menekan BTN1+BTN2 bersamaan (kembali ke lobby).
+       * MODE 7: Kontrol Servo via Potensiometer
+       * ADC 12-bit (0–4095) dipetakan ke pulsa PWM servo:
+       *   ADC = 0    -> 500  µs (~0°)
+       *   ADC = 2047 -> 1500 µs (~90°)
+       *   ADC = 4095 -> 2500 µs (~180°)
+       * LED bar menampilkan posisi servo (0–8 LED menyala).
        * ---------------------------------------------------------- */
       case 7:
+      {
+        if (current_tick - mode_last_tick >= SERVO_POT_MS) {
+          mode_last_tick = current_tick;
+
+          /* Filter IIR ringan untuk meredam noise ADC */
+          static uint32_t servo_adc_filtered = 0;
+          servo_adc_filtered = (servo_adc_filtered * 7 + adc_dma_val) / 8;
+
+          /* Peta ADC 0–4095 ke pulse width 500–2500 µs */
+          uint32_t pulse = 500u + (servo_adc_filtered * 2000u / 4095u);
+          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, pulse);
+
+          /* LED bar: 0 LED (ADC=0) hingga 8 LED (ADC=4095) */
+          uint8_t led_bar = (uint8_t)(servo_adc_filtered * 8u / 4095u);
+          uint8_t pattern = (led_bar == 0) ? 0x00u : (uint8_t)(0xFF00u >> led_bar);
+          set_leds(pattern);
+        }
+        break;
+      }
+
+      /* ----------------------------------------------------------
+       * MODE 8: Rhythm Tap Game (Fase 1)
+       * Keluar dengan menekan BTN1+BTN2 bersamaan (kembali ke lobby).
+       * ---------------------------------------------------------- */
+      case 8:
         RhythmGame_Run();
         break;
 
       /* ----------------------------------------------------------
-       * MODE 8: Game Konversi Biner (Fase 2)
+       * MODE 9: Game Konversi Biner (Fase 2)
        * Keluar dengan menekan BTN1+BTN2 bersamaan.
        * ---------------------------------------------------------- */
-      case 8:
+      case 9:
         BinaryGame_Run();
         break;
 
       /* ----------------------------------------------------------
-       * MODE 9: Lobby pemilihan game
+       * MODE 10: Lobby pemilihan game
        * LED8 menyala (game 1) atau LED7+LED8 menyala (game 2).
        * LED sudah diatur saat masuk/berganti mode — tidak ada aksi
        * di loop, cukup tunggu input user.
        * ---------------------------------------------------------- */
-      case 9:
+      case 10:
         break;
 
       default:
@@ -1040,9 +1063,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
             HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
           }
         }
-      } else if (current_mode == 7) {
-        RhythmGame_BTN1_Tap();
       } else if (current_mode == 8) {
+        RhythmGame_BTN1_Tap();
+      } else if (current_mode == 9) {
         BinaryGame_BTN1_Press();
       } else {
         btn1_flag = 1;
@@ -1064,9 +1087,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
           /* Double click di lobby: mulai game dengan countdown 3-2-1 */
           game_start_pending = 1;
         }
-      } else if (current_mode == 7) {
-        RhythmGame_BTN2_Press();
       } else if (current_mode == 8) {
+        RhythmGame_BTN2_Press();
+      } else if (current_mode == 9) {
         BinaryGame_BTN2_Press();
       } else {
         btn2_flag = 1;
