@@ -92,6 +92,7 @@ uint8_t  counter_phase = 0;           /* 0 = NIM sendiri, 1 = NIM partner   */
 /* ---- Mode 3: ADC -> LED (dipantau Cube Monitor - Gauge) ---- */
 volatile uint32_t adc_dma_val = 0;    /* buffer DMA hasil ADC               */
 volatile uint32_t led_count   = 0;    /* jumlah LED menyala (0-8)           */
+uint8_t current_led_mask      = 0;    /* snapshot bitmask LED aktif untuk JSON */
 
 /* ---- Mode 4: dua kereta bertabrakan ---- */
 uint8_t train_step = 0;               /* langkah animasi kereta (0-2)       */
@@ -155,6 +156,7 @@ static const LED_t leds[8] = {
  */
 static void set_leds(uint8_t pattern)
 {
+    current_led_mask = pattern;
     for (int i = 0; i < 8; i++) {
         HAL_GPIO_WritePin(leds[i].port, leds[i].pin,
                           ((pattern >> i) & 1u) ? GPIO_PIN_SET : GPIO_PIN_RESET);
@@ -669,21 +671,19 @@ int main(void)
       // Siapkan buffer untuk semua data termasuk DHT11
       char buffer[200];
 
-      // Format JSON dengan tambahan field temp dan hum dari DHT11
+      // Format JSON — field names sesuai dengan STM32Data di dashboard
       // Gunakan %d (integer) agar tidak perlu linker flag -u _printf_float
       uint16_t len = snprintf(buffer, sizeof(buffer),
-        "{\"mode\":%d,\"adc\":%lu,\"cnt\":%lu,\"leds\":%lu,\"shift\":%d,\"train\":%d,\"bin\":%d,\"m6_pat\":%u,\"dist\":%lu,\"temp\":%d,\"hum\":%d}\r\n",
+        "{\"mode\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d}\r\n",
         current_mode,
         adc_dma_val,
         counter_value,
-        led_count,
-        shift_pos,
-        train_step,
-        binary_count,
-        mode6_pattern,
+        current_led_mask,
         distance_cm,
         (int)dht11_temp,
-        (int)dht11_hum);
+        (int)dht11_hum,
+        rg.score,
+        (int)rg.lives);
 
       // Kirim data menggunakan USB CDC
       CDC_Transmit_FS((uint8_t*)buffer, len);

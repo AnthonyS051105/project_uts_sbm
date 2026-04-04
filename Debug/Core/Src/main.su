@@ -1,8 +1,8 @@
-../Core/Src/main.c:134:6:BinaryGame_UART_Transmit	16	static
-../Core/Src/main.c:156:13:set_leds	24	static
-../Core/Src/main.c:164:13:all_leds_on	8	static
-../Core/Src/main.c:165:13:all_leds_off	8	static
-../Core/Src/main.c:173:5:main	400	static
+../Core/Src/main.c:135:6:BinaryGame_UART_Transmit	16	static
+../Core/Src/main.c:157:13:set_leds	24	static
+../Core/Src/main.c:166:13:all_leds_on	8	static
+../Core/Src/main.c:167:13:all_leds_off	8	static
+../Core/Src/main.c:175:5:main	384	static
 ../Core/Src/main.c:700:6:SystemClock_Config	88	static
 ../Core/Src/main.c:746:13:MX_ADC1_Init	24	static
 ../Core/Src/main.c:798:13:MX_TIM2_Init	32	static
