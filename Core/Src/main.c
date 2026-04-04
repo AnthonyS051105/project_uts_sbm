@@ -68,6 +68,10 @@ volatile uint8_t btn2_flag     = 0;   /* set oleh EXTI BTN2                 */
 uint32_t btn1_last_tick        = 0;
 uint32_t btn2_last_tick        = 0;
 
+/* ---- Variabel Kontrol Servo ---- */
+uint32_t servo_last_tick = 0;         /* Menyimpan waktu update terakhir */
+uint8_t servo_step = 0;               /* Menyimpan state/posisi servo saat ini */
+
 /* ---- Mode 1: shift left ---- */
 uint8_t shift_pos = 0;                /* posisi LED yang menyala (0-7)      */
 
@@ -106,11 +110,6 @@ static void MX_TIM3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int __io_putchar(int ch)
-{
-    HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
-    return ch;
-}
 
 /* Tabel urutan LED 1-8 (LED8 sebagai LSB/kanan, LED1 sebagai MSB/kiri) */
 typedef struct { GPIO_TypeDef *port; uint16_t pin; } LED_t;
@@ -188,6 +187,18 @@ int main(void)
   /* USER CODE BEGIN 2 */
   /* Mulai ADC secara continuous via DMA; adc_dma_val diperbarui otomatis */
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_dma_val, 1);
+
+  /* PAKSA INISIALISASI PIN PB8 UNTUK PWM TIM4 (ALTERNATE FUNCTION 2) */
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  GPIO_InitStruct.Pin = GPIO_PIN_8;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;       // Mode Alternate Function Push Pull
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;    // Hubungkan pin ini ke TIM4
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* Mulai PWM untuk Servo di TIM4 Channel 3 */
+  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -197,6 +208,30 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    /* ============================================================
+     * Kontrol Servo SG90 (0° -> 90° -> 180°) tanpa HAL_Delay
+     * Menggunakan polling HAL_GetTick() dengan jeda 1000ms (1 detik)
+     * ============================================================ */
+    uint32_t current_tick = HAL_GetTick();
+    if ((current_tick - servo_last_tick) >= 1000) {
+      servo_last_tick = current_tick; // Update waktu terakhir
+
+      switch (servo_step) {
+        case 0:
+          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 500);  // Posisi ~0 derajat
+          servo_step = 1;
+          break;
+        case 1:
+          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 1500); // Posisi ~90 derajat
+          servo_step = 2;
+          break;
+        case 2:
+          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 2500); // Posisi ~180 derajat
+          servo_step = 0;
+          break;
+      }
+    }
 
     /* ============================================================
      * BTN1 + BTN2 bersamaan: toggle Mode Game

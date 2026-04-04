@@ -270,10 +270,3 @@ void OTG_FS_IRQHandler(void)
 
   /* USER CODE END OTG_FS_IRQn 1 */
 }
-
-/* USER CODE BEGIN 1 */
-void TIM3_IRQHandler(void)
-{
-  WhackGame_TIM3_ISR();
-}
-/* USER CODE END 1 */

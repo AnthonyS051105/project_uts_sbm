@@ -69,7 +69,6 @@ static volatile uint32_t b1_tick = 0;
 static volatile uint32_t b2_tick = 0;
 
 static uint8_t last_result_type = 0; // 0=HIT, 1=WRONG, 2=TIMEOUT, 3=PARTIAL
-static uint8_t last_hit_button = 0; // 1 or 2
 static uint32_t last_reaction_time = 0;
 
 void WhackGame_TIM3_ISR(void) {
@@ -158,7 +157,6 @@ static uint8_t getCorrectButton(uint8_t ledPos) {
 
 static void evaluate_hit(void) {
     char buf[128];
-    uint32_t now = HAL_GetTick();
     
     if (is_double_spawn) {
         // Needs both B1 and B2 within 200ms
