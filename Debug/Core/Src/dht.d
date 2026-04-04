@@ -1,4 +1,4 @@
-Core/Src/stm32f4xx_it.o: ../Core/Src/stm32f4xx_it.c ../Core/Inc/main.h \
+Core/Src/dht.o: ../Core/Src/dht.c ../Core/Inc/dht.h ../Core/Inc/tim.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h \
  ../Core/Inc/stm32f4xx_hal_conf.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h \
@@ -32,9 +32,9 @@ Core/Src/stm32f4xx_it.o: ../Core/Src/stm32f4xx_it.c ../Core/Inc/main.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_usb.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd_ex.h \
- ../Core/Inc/stm32f4xx_it.h ../Core/Inc/whack_game.h ../Core/Inc/main.h \
- ../Core/Inc/dht.h ../Core/Inc/tim.h
-../Core/Inc/main.h:
+ ../Core/Inc/dhtConf.h ../Core/Inc/tim.h
+../Core/Inc/dht.h:
+../Core/Inc/tim.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 ../Core/Inc/stm32f4xx_hal_conf.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_rcc.h:
@@ -68,8 +68,5 @@ Core/Src/stm32f4xx_it.o: ../Core/Src/stm32f4xx_it.c ../Core/Inc/main.h \
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_ll_usb.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pcd_ex.h:
-../Core/Inc/stm32f4xx_it.h:
-../Core/Inc/whack_game.h:
-../Core/Inc/main.h:
-../Core/Inc/dht.h:
+../Core/Inc/dhtConf.h:
 ../Core/Inc/tim.h:

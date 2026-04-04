@@ -7,6 +7,7 @@
 C_SRCS += \
 ../Core/Src/binary_game.c \
 ../Core/Src/charge_game.c \
+../Core/Src/dht.c \
 ../Core/Src/flash_storage.c \
 ../Core/Src/main.c \
 ../Core/Src/rhythm_game.c \
@@ -20,6 +21,7 @@ C_SRCS += \
 OBJS += \
 ./Core/Src/binary_game.o \
 ./Core/Src/charge_game.o \
+./Core/Src/dht.o \
 ./Core/Src/flash_storage.o \
 ./Core/Src/main.o \
 ./Core/Src/rhythm_game.o \
@@ -33,6 +35,7 @@ OBJS += \
 C_DEPS += \
 ./Core/Src/binary_game.d \
 ./Core/Src/charge_game.d \
+./Core/Src/dht.d \
 ./Core/Src/flash_storage.d \
 ./Core/Src/main.d \
 ./Core/Src/rhythm_game.d \
@@ -51,7 +54,7 @@ Core/Src/%.o Core/Src/%.su Core/Src/%.cyclo: ../Core/Src/%.c Core/Src/subdir.mk
 clean: clean-Core-2f-Src
 
 clean-Core-2f-Src:
-	-$(RM) ./Core/Src/binary_game.cyclo ./Core/Src/binary_game.d ./Core/Src/binary_game.o ./Core/Src/binary_game.su ./Core/Src/charge_game.cyclo ./Core/Src/charge_game.d ./Core/Src/charge_game.o ./Core/Src/charge_game.su ./Core/Src/flash_storage.cyclo ./Core/Src/flash_storage.d ./Core/Src/flash_storage.o ./Core/Src/flash_storage.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/rhythm_game.cyclo ./Core/Src/rhythm_game.d ./Core/Src/rhythm_game.o ./Core/Src/rhythm_game.su ./Core/Src/stm32f4xx_hal_msp.cyclo ./Core/Src/stm32f4xx_hal_msp.d ./Core/Src/stm32f4xx_hal_msp.o ./Core/Src/stm32f4xx_hal_msp.su ./Core/Src/stm32f4xx_it.cyclo ./Core/Src/stm32f4xx_it.d ./Core/Src/stm32f4xx_it.o ./Core/Src/stm32f4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32f4xx.cyclo ./Core/Src/system_stm32f4xx.d ./Core/Src/system_stm32f4xx.o ./Core/Src/system_stm32f4xx.su ./Core/Src/whack_game.cyclo ./Core/Src/whack_game.d ./Core/Src/whack_game.o ./Core/Src/whack_game.su
+	-$(RM) ./Core/Src/binary_game.cyclo ./Core/Src/binary_game.d ./Core/Src/binary_game.o ./Core/Src/binary_game.su ./Core/Src/charge_game.cyclo ./Core/Src/charge_game.d ./Core/Src/charge_game.o ./Core/Src/charge_game.su ./Core/Src/dht.cyclo ./Core/Src/dht.d ./Core/Src/dht.o ./Core/Src/dht.su ./Core/Src/flash_storage.cyclo ./Core/Src/flash_storage.d ./Core/Src/flash_storage.o ./Core/Src/flash_storage.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/rhythm_game.cyclo ./Core/Src/rhythm_game.d ./Core/Src/rhythm_game.o ./Core/Src/rhythm_game.su ./Core/Src/stm32f4xx_hal_msp.cyclo ./Core/Src/stm32f4xx_hal_msp.d ./Core/Src/stm32f4xx_hal_msp.o ./Core/Src/stm32f4xx_hal_msp.su ./Core/Src/stm32f4xx_it.cyclo ./Core/Src/stm32f4xx_it.d ./Core/Src/stm32f4xx_it.o ./Core/Src/stm32f4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32f4xx.cyclo ./Core/Src/system_stm32f4xx.d ./Core/Src/system_stm32f4xx.o ./Core/Src/system_stm32f4xx.su ./Core/Src/whack_game.cyclo ./Core/Src/whack_game.d ./Core/Src/whack_game.o ./Core/Src/whack_game.su
 
 .PHONY: clean-Core-2f-Src
 

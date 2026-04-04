@@ -29,6 +29,7 @@
 #include "charge_game.h"
 #include "whack_game.h"
 #include "binary_game.h"
+#include "dht.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,6 +58,7 @@
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
@@ -103,6 +105,12 @@ uint8_t mode6_pattern = 0;
 
 /* ---- Mode Game: deteksi tekan bersamaan ---- */
 volatile uint8_t simultaneous_flag = 0; /* set jika BTN1+BTN2 ditekan bersamaan */
+
+/* ---- Sensor DHT11 ---- */
+DHT_t    dht11;
+float    dht11_temp     = 0.0f;   /* suhu terakhir (°C)  */
+float    dht11_hum      = 0.0f;   /* kelembaban terakhir (%) */
+uint32_t dht11_last_tick = 0;     /* timestamp pembacaan terakhir */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -112,6 +120,7 @@ static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -192,6 +201,7 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_TIM4_Init();
   MX_TIM3_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   /* Mulai ADC secara continuous via DMA; adc_dma_val diperbarui otomatis */
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_dma_val, 1);
@@ -221,6 +231,13 @@ int main(void)
   /* Mulai timer 3 untuk HC-SR04 (1 MHz = 1 tick per 1 mikrodetik) */
   HAL_TIM_Base_Start(&htim3);
   HAL_TIM_IC_Start(&htim3, TIM_CHANNEL_1); // Polling mode untuk baca Echo
+
+  /* ---- Init DHT11 ----
+   * Pin  : PB0 (DHT11_Pin / DHT11_GPIO_Port, sudah terdefinisi di main.h)
+   * Timer: TIM2 dikonfigurasi library ke 1 MHz (bus 16 MHz, prescaler = 15)
+   * Library menunggu hingga HAL_GetTick() >= 2000 ms sebagai warm-up DHT. */
+  HAL_TIM_Base_Start(&htim2);
+  DHT_init(&dht11, DHT_Type_DHT11, &htim2, 84, DHT11_GPIO_Port, DHT11_Pin);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -567,18 +584,28 @@ int main(void)
     }
 
     /* ============================================================
-     * Kirim data ke USB CDC tiap 100ms
+     * Baca DHT11 setiap 2000ms (non-blocking menggunakan HAL_GetTick)
+     * DHT_readData mengirim start-signal lalu menunggu data lewat EXTI.
+     * ============================================================ */
+    if ((current_tick - dht11_last_tick) >= 2000) {
+      dht11_last_tick = current_tick;
+      DHT_readData(&dht11, &dht11_temp, &dht11_hum);
+    }
+
+    /* ============================================================
+     * Kirim data ke USB CDC tiap 200ms
      * ============================================================ */
     static uint32_t usb_last_tick = 0;
     if (current_tick - usb_last_tick >= 200) {
       usb_last_tick = current_tick;
 
-      // Siapkan buffer yang lebih besar untuk menampung semua data
-      char buffer[150];
+      // Siapkan buffer untuk semua data termasuk DHT11
+      char buffer[200];
 
-      // Memformat semua variabel penting ke dalam format JSON agar dapat dibaca oleh website
+      // Format JSON dengan tambahan field temp dan hum dari DHT11
+      // Gunakan %d (integer) agar tidak perlu linker flag -u _printf_float
       uint16_t len = snprintf(buffer, sizeof(buffer),
-        "{\"mode\":%d,\"adc\":%lu,\"cnt\":%lu,\"leds\":%lu,\"shift\":%d,\"train\":%d,\"bin\":%d,\"m6_pat\":%u,\"dist\":%lu}\r\n",
+        "{\"mode\":%d,\"adc\":%lu,\"cnt\":%lu,\"leds\":%lu,\"shift\":%d,\"train\":%d,\"bin\":%d,\"m6_pat\":%u,\"dist\":%lu,\"temp\":%d,\"hum\":%d}\r\n",
         current_mode,
         adc_dma_val,
         counter_value,
@@ -587,7 +614,9 @@ int main(void)
         train_step,
         binary_count,
         mode6_pattern,
-        distance_cm);
+        distance_cm,
+        (int)dht11_temp,
+        (int)dht11_hum);
 
       // Kirim data menggunakan USB CDC
       CDC_Transmit_FS((uint8_t*)buffer, len);
@@ -691,6 +720,51 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 83;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -849,8 +923,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : DHT11_Pin */
   GPIO_InitStruct.Pin = DHT11_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(DHT11_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LED8_Pin LED4_Pin LED3_Pin LED2_Pin
@@ -863,6 +937,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
@@ -891,6 +968,10 @@ static void MX_GPIO_Init(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   uint32_t now = HAL_GetTick();
+
+  if(GPIO_Pin == DHT11_Pin){
+	  DHT_pinChangeCallBack(&dht11);
+  }
 
   if (GPIO_Pin == BTN1_Pin) {
     if ((now - btn1_last_tick) > DEBOUNCE_MS) {

@@ -1,5 +1,6 @@
 "./Core/Src/binary_game.o"
 "./Core/Src/charge_game.o"
+"./Core/Src/dht.o"
 "./Core/Src/flash_storage.o"
 "./Core/Src/main.o"
 "./Core/Src/rhythm_game.o"

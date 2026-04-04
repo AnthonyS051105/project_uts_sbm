@@ -75,6 +75,7 @@ void Error_Handler(void);
 #define BUZZER_GPIO_Port GPIOA
 #define DHT11_Pin GPIO_PIN_0
 #define DHT11_GPIO_Port GPIOB
+#define DHT11_EXTI_IRQn EXTI0_IRQn
 #define LED8_Pin GPIO_PIN_14
 #define LED8_GPIO_Port GPIOB
 #define LED7_Pin GPIO_PIN_8

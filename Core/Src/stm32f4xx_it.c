@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "whack_game.h"
+#include "dht.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -60,7 +61,7 @@ extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 extern DMA_HandleTypeDef hdma_adc1;
 extern TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN EV */
-
+extern DHT_t dht11;   /* instance DHT11 yang dideklarasikan di main.c */
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -202,6 +203,20 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles EXTI line0 interrupt.
+  */
+void EXTI0_IRQHandler(void)
+{
+  /* USER CODE BEGIN EXTI0_IRQn 0 */
+
+  /* USER CODE END EXTI0_IRQn 0 */
+  HAL_GPIO_EXTI_IRQHandler(DHT11_Pin);
+  /* USER CODE BEGIN EXTI0_IRQn 1 */
+
+  /* USER CODE END EXTI0_IRQn 1 */
+}
+
+/**
   * @brief This function handles EXTI line1 interrupt.
   */
 void EXTI1_IRQHandler(void)
@@ -270,3 +285,13 @@ void OTG_FS_IRQHandler(void)
 
   /* USER CODE END OTG_FS_IRQn 1 */
 }
+
+/* USER CODE BEGIN 1 */
+
+/**
+  * @brief  EXTI line0 interrupt handler — pin PB0 (DHT11 data line).
+  *         Setiap perubahan tepi (rising/falling) diteruskan ke library DHT
+  *         agar library dapat merekam lebar pulsa dari sensor.
+  */
+
+/* USER CODE END 1 */
