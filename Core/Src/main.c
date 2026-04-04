@@ -473,9 +473,9 @@ int main(void)
     // Siapkan buffer yang lebih besar untuk menampung semua data
     char buffer[150];
 
-    // Memformat semua variabel penting ke dalam satu teks yang rapi
+    // Memformat semua variabel penting ke dalam format JSON agar dapat dibaca oleh website
     uint16_t len = snprintf(buffer, sizeof(buffer),
-      "Mode: %d | ADC: %lu | Cnt: %lu | LEDs: %lu | Shift: %d | Train: %d | Bin: %d | M6_Pat: %02X\r\n",
+      "{\"mode\":%d,\"adc\":%lu,\"cnt\":%lu,\"leds\":%lu,\"shift\":%d,\"train\":%d,\"bin\":%d,\"m6_pat\":%u}\r\n",
       current_mode,
       adc_dma_val,
       counter_value,

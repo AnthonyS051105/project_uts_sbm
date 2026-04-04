@@ -7,23 +7,23 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
   1 .text         0000cfb8  080001a0  080001a0  000011a0  2**4
                   CONTENTS, ALLOC, LOAD, READONLY, CODE
-  2 .rodata       00000324  0800d158  0800d158  0000e158  2**2
+  2 .rodata       0000031c  0800d158  0800d158  0000e158  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  3 .ARM.extab    00000000  0800d47c  0800d47c  0000f18c  2**0
+  3 .ARM.extab    00000000  0800d474  0800d474  0000f18c  2**0
                   CONTENTS, READONLY
-  4 .ARM          00000008  0800d47c  0800d47c  0000e47c  2**2
+  4 .ARM          00000008  0800d474  0800d474  0000e474  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  5 .preinit_array 00000000  0800d484  0800d484  0000f18c  2**0
+  5 .preinit_array 00000000  0800d47c  0800d47c  0000f18c  2**0
                   CONTENTS, ALLOC, LOAD, DATA
-  6 .init_array   00000004  0800d484  0800d484  0000e484  2**2
+  6 .init_array   00000004  0800d47c  0800d47c  0000e47c  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  7 .fini_array   00000004  0800d488  0800d488  0000e488  2**2
+  7 .fini_array   00000004  0800d480  0800d480  0000e480  2**2
                   CONTENTS, ALLOC, LOAD, READONLY, DATA
-  8 .data         0000018c  20000000  0800d48c  0000f000  2**2
+  8 .data         0000018c  20000000  0800d484  0000f000  2**2
                   CONTENTS, ALLOC, LOAD, DATA
-  9 .bss          00001768  2000018c  0800d618  0000f18c  2**2
+  9 .bss          00001768  2000018c  0800d610  0000f18c  2**2
                   ALLOC
- 10 ._user_heap_stack 00000c04  200018f4  0800d618  0000f8f4  2**0
+ 10 ._user_heap_stack 00000c04  200018f4  0800d610  0000f8f4  2**0
                   ALLOC
  11 .ARM.attributes 00000030  00000000  00000000  0000f18c  2**0
                   CONTENTS, READONLY
@@ -1095,7 +1095,7 @@ static void bg_set_leds(uint8_t pattern)
  8000cf2:	46bd      	mov	sp, r7
  8000cf4:	bd80      	pop	{r7, pc}
  8000cf6:	bf00      	nop
- 8000cf8:	0800d350 	.word	0x0800d350
+ 8000cf8:	0800d348 	.word	0x0800d348
 
 08000cfc <BinaryGame_UART_Transmit>:
 
@@ -2770,7 +2770,7 @@ static void set_leds(uint8_t pattern)
  8001806:	46bd      	mov	sp, r7
  8001808:	bd80      	pop	{r7, pc}
  800180a:	bf00      	nop
- 800180c:	0800d390 	.word	0x0800d390
+ 800180c:	0800d388 	.word	0x0800d388
 
 08001810 <all_leds_on>:
 
@@ -3507,7 +3507,7 @@ int main(void)
     // Siapkan buffer yang lebih besar untuk menampung semua data
     char buffer[150];
 
-    // Memformat semua variabel penting ke dalam satu teks yang rapi
+    // Memformat semua variabel penting ke dalam format JSON agar dapat dibaca oleh website
     uint16_t len = snprintf(buffer, sizeof(buffer),
  8001cde:	4b20      	ldr	r3, [pc, #128]	@ (8001d60 <main+0x534>)
  8001ce0:	781b      	ldrb	r3, [r3, #0]
@@ -3562,7 +3562,7 @@ int main(void)
  8001d3c:	200002e4 	.word	0x200002e4
  8001d40:	00100101 	.word	0x00100101
  8001d44:	200002ec 	.word	0x200002ec
- 8001d48:	0800d3d0 	.word	0x0800d3d0
+ 8001d48:	0800d3c8 	.word	0x0800d3c8
  8001d4c:	92492493 	.word	0x92492493
  8001d50:	200002ed 	.word	0x200002ed
  8001d54:	200002ee 	.word	0x200002ee
@@ -4440,7 +4440,7 @@ static void rg_set_leds(uint8_t pattern)
  800227a:	46bd      	mov	sp, r7
  800227c:	bd80      	pop	{r7, pc}
  800227e:	bf00      	nop
- 8002280:	0800d3e0 	.word	0x0800d3e0
+ 8002280:	0800d3d8 	.word	0x0800d3d8
 
 08002284 <rg_calc_beat_ms>:
  *  Fungsi internal                                                     *
@@ -5284,9 +5284,9 @@ static void rg_send_uart_result(void)
  8002824:	bd90      	pop	{r4, r7, pc}
  8002826:	bf00      	nop
  8002828:	200002f8 	.word	0x200002f8
- 800282c:	0800d22c 	.word	0x0800d22c
- 8002830:	0800d248 	.word	0x0800d248
- 8002834:	0800d254 	.word	0x0800d254
+ 800282c:	0800d224 	.word	0x0800d224
+ 8002830:	0800d240 	.word	0x0800d240
+ 8002834:	0800d24c 	.word	0x0800d24c
 
 08002838 <RhythmGame_Init>:
 /* ================================================================== *
@@ -5856,7 +5856,7 @@ void RhythmGame_Run(void)
  8002b9c:	46bd      	mov	sp, r7
  8002b9e:	bd80      	pop	{r7, pc}
  8002ba0:	200002f8 	.word	0x200002f8
- 8002ba4:	0800d420 	.word	0x0800d420
+ 8002ba4:	0800d418 	.word	0x0800d418
  8002ba8:	20000360 	.word	0x20000360
 
 08002bac <HAL_MspInit>:
@@ -7590,7 +7590,7 @@ static void evaluate_hit(void) {
  80035c4:	20000008 	.word	0x20000008
  80035c8:	200003a8 	.word	0x200003a8
  80035cc:	200003bc 	.word	0x200003bc
- 80035d0:	0800d260 	.word	0x0800d260
+ 80035d0:	0800d258 	.word	0x0800d258
  80035d4:	2000039c 	.word	0x2000039c
  80035d8:	2000038c 	.word	0x2000038c
  80035dc:	20000390 	.word	0x20000390
@@ -7735,7 +7735,7 @@ static void evaluate_hit(void) {
  80036c8:	200003bc 	.word	0x200003bc
  80036cc:	20000394 	.word	0x20000394
  80036d0:	20000378 	.word	0x20000378
- 80036d4:	0800d298 	.word	0x0800d298
+ 80036d4:	0800d290 	.word	0x0800d290
  80036d8:	200003b8 	.word	0x200003b8
  80036dc:	2000037c 	.word	0x2000037c
  80036e0:	2000038c 	.word	0x2000038c
@@ -8537,7 +8537,7 @@ void WhackGame_Run(void) {
  8003d20:	20000388 	.word	0x20000388
  8003d24:	2000038c 	.word	0x2000038c
  8003d28:	20000390 	.word	0x20000390
- 8003d2c:	0800d2cc 	.word	0x0800d2cc
+ 8003d2c:	0800d2c4 	.word	0x0800d2c4
 
 08003d30 <Reset_Handler>:
 
@@ -8625,7 +8625,7 @@ LoopFillZerobss:
   ldr r1, =_edata
  8003d70:	2000018c 	.word	0x2000018c
   ldr r2, =_sidata
- 8003d74:	0800d48c 	.word	0x0800d48c
+ 8003d74:	0800d484 	.word	0x0800d484
   ldr r2, =_sbss
  8003d78:	2000018c 	.word	0x2000018c
   ldr r4, =_ebss
@@ -11844,7 +11844,7 @@ static uint32_t DMA_CalcBaseAndBitshift(DMA_HandleTypeDef *hdma)
  8004e9c:	4770      	bx	lr
  8004e9e:	bf00      	nop
  8004ea0:	aaaaaaab 	.word	0xaaaaaaab
- 8004ea4:	0800d440 	.word	0x0800d440
+ 8004ea4:	0800d438 	.word	0x0800d438
 
 08004ea8 <DMA_CheckFifoParam>:
   * @param  hdma       pointer to a DMA_HandleTypeDef structure that contains
@@ -18331,7 +18331,7 @@ HAL_StatusTypeDef HAL_RCC_ClockConfig(const RCC_ClkInitTypeDef  *RCC_ClkInitStru
  800744e:	bf00      	nop
  8007450:	40023c00 	.word	0x40023c00
  8007454:	40023800 	.word	0x40023800
- 8007458:	0800d428 	.word	0x0800d428
+ 8007458:	0800d420 	.word	0x0800d420
  800745c:	20000004 	.word	0x20000004
  8007460:	20000018 	.word	0x20000018
 
@@ -18588,7 +18588,7 @@ uint32_t HAL_RCC_GetPCLK1Freq(void)
  8007624:	4618      	mov	r0, r3
  8007626:	bd80      	pop	{r7, pc}
  8007628:	40023800 	.word	0x40023800
- 800762c:	0800d438 	.word	0x0800d438
+ 800762c:	0800d430 	.word	0x0800d430
 
 08007630 <HAL_RCC_GetPCLK2Freq>:
   * @note   Each time PCLK2 changes, this function must be called to update the
@@ -18614,7 +18614,7 @@ uint32_t HAL_RCC_GetPCLK2Freq(void)
  800764c:	4618      	mov	r0, r3
  800764e:	bd80      	pop	{r7, pc}
  8007650:	40023800 	.word	0x40023800
- 8007654:	0800d438 	.word	0x0800d438
+ 8007654:	0800d430 	.word	0x0800d430
 
 08007658 <HAL_UART_Init>:
   * @param  huart  Pointer to a UART_HandleTypeDef structure that contains
@@ -29500,7 +29500,7 @@ uint8_t * USBD_FS_ProductStrDescriptor(USBD_SpeedTypeDef speed, uint16_t *length
  800b750:	bd80      	pop	{r7, pc}
  800b752:	bf00      	nop
  800b754:	20000ea4 	.word	0x20000ea4
- 800b758:	0800d308 	.word	0x0800d308
+ 800b758:	0800d300 	.word	0x0800d300
 
 0800b75c <USBD_FS_ManufacturerStrDescriptor>:
   * @param  speed : Current device speed
@@ -29529,7 +29529,7 @@ uint8_t * USBD_FS_ManufacturerStrDescriptor(USBD_SpeedTypeDef speed, uint16_t *l
  800b778:	46bd      	mov	sp, r7
  800b77a:	bd80      	pop	{r7, pc}
  800b77c:	20000ea4 	.word	0x20000ea4
- 800b780:	0800d320 	.word	0x0800d320
+ 800b780:	0800d318 	.word	0x0800d318
 
 0800b784 <USBD_FS_SerialStrDescriptor>:
   * @param  speed : Current device speed
@@ -29608,7 +29608,7 @@ uint8_t * USBD_FS_ConfigStrDescriptor(USBD_SpeedTypeDef speed, uint16_t *length)
  800b7d8:	bd80      	pop	{r7, pc}
  800b7da:	bf00      	nop
  800b7dc:	20000ea4 	.word	0x20000ea4
- 800b7e0:	0800d334 	.word	0x0800d334
+ 800b7e0:	0800d32c 	.word	0x0800d32c
 
 0800b7e4 <USBD_FS_InterfaceStrDescriptor>:
   * @param  speed : Current device speed
@@ -29652,7 +29652,7 @@ uint8_t * USBD_FS_InterfaceStrDescriptor(USBD_SpeedTypeDef speed, uint16_t *leng
  800b814:	bd80      	pop	{r7, pc}
  800b816:	bf00      	nop
  800b818:	20000ea4 	.word	0x20000ea4
- 800b81c:	0800d340 	.word	0x0800d340
+ 800b81c:	0800d338 	.word	0x0800d338
 
 0800b820 <Get_SerialNum>:
   * @brief  Create the serial number string descriptor
@@ -31309,10 +31309,10 @@ USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status)
  800c282:	4798      	blx	r3
  800c284:	3601      	adds	r6, #1
  800c286:	e7f2      	b.n	800c26e <__libc_init_array+0x1e>
- 800c288:	0800d484 	.word	0x0800d484
- 800c28c:	0800d484 	.word	0x0800d484
- 800c290:	0800d484 	.word	0x0800d484
- 800c294:	0800d488 	.word	0x0800d488
+ 800c288:	0800d47c 	.word	0x0800d47c
+ 800c28c:	0800d47c 	.word	0x0800d47c
+ 800c290:	0800d47c 	.word	0x0800d47c
+ 800c294:	0800d480 	.word	0x0800d480
 
 0800c298 <__retarget_lock_init_recursive>:
  800c298:	4770      	bx	lr
@@ -31822,11 +31822,11 @@ USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status)
  800c724:	4638      	mov	r0, r7
  800c726:	f000 f9bb 	bl	800caa0 <_printf_i>
  800c72a:	e7ed      	b.n	800c708 <_svfiprintf_r+0x1c0>
- 800c72c:	0800d448 	.word	0x0800d448
- 800c730:	0800d452 	.word	0x0800d452
+ 800c72c:	0800d440 	.word	0x0800d440
+ 800c730:	0800d44a 	.word	0x0800d44a
  800c734:	00000000 	.word	0x00000000
  800c738:	0800c491 	.word	0x0800c491
- 800c73c:	0800d44e 	.word	0x0800d44e
+ 800c73c:	0800d446 	.word	0x0800d446
 
 0800c740 <__sfputc_r>:
  800c740:	6893      	ldr	r3, [r2, #8]
@@ -32092,11 +32092,11 @@ USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status)
  800c9a8:	4630      	mov	r0, r6
  800c9aa:	f000 f879 	bl	800caa0 <_printf_i>
  800c9ae:	e7e4      	b.n	800c97a <_vfiprintf_r+0x1e6>
- 800c9b0:	0800d448 	.word	0x0800d448
- 800c9b4:	0800d452 	.word	0x0800d452
+ 800c9b0:	0800d440 	.word	0x0800d440
+ 800c9b4:	0800d44a 	.word	0x0800d44a
  800c9b8:	00000000 	.word	0x00000000
  800c9bc:	0800c76f 	.word	0x0800c76f
- 800c9c0:	0800d44e 	.word	0x0800d44e
+ 800c9c0:	0800d446 	.word	0x0800d446
 
 0800c9c4 <_printf_common>:
  800c9c4:	e92d 47f0 	stmdb	sp!, {r4, r5, r6, r7, r8, r9, sl, lr}
@@ -32425,8 +32425,8 @@ USBD_StatusTypeDef USBD_Get_USB_Status(HAL_StatusTypeDef hal_status)
  800cccc:	2500      	movs	r5, #0
  800ccce:	f104 0619 	add.w	r6, r4, #25
  800ccd2:	e7f5      	b.n	800ccc0 <_printf_i+0x220>
- 800ccd4:	0800d459 	.word	0x0800d459
- 800ccd8:	0800d46a 	.word	0x0800d46a
+ 800ccd4:	0800d451 	.word	0x0800d451
+ 800ccd8:	0800d462 	.word	0x0800d462
 
 0800ccdc <__sflush_r>:
  800ccdc:	f9b1 200c 	ldrsh.w	r2, [r1, #12]
