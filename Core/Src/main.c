@@ -72,6 +72,14 @@ uint32_t btn2_last_tick        = 0;
 uint32_t servo_last_tick = 0;         /* Menyimpan waktu update terakhir */
 uint8_t servo_step = 0;               /* Menyimpan state/posisi servo saat ini */
 
+/* ---- Sensor HC-SR04 Variabel ---- */
+uint8_t  hcsr04_state      = 0;       /* 0: Idle, 1: Trig, 2: Wait Rising, 3: Wait Falling */
+uint32_t hcsr04_last_tick  = 0;       /* Waktu polling terakhir */
+uint16_t hcsr04_trig_start = 0;       /* Catatan waktu mulai trigger */
+uint16_t hcsr04_ic_val1    = 0;       /* Capture nilai saat sinyal Echo naik */
+uint16_t hcsr04_ic_val2    = 0;       /* Capture nilai saat sinyal Echo turun */
+uint32_t distance_cm       = 0;       /* Hasil pembacaan jarak dalam cm */
+
 /* ---- Mode 1: shift left ---- */
 uint8_t shift_pos = 0;                /* posisi LED yang menyala (0-7)      */
 
@@ -197,8 +205,22 @@ int main(void)
   GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;    // Hubungkan pin ini ke TIM4
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /* PAKSA INISIALISASI PIN PA6 UNTUK ECHO HC-SR04 (TIM3 CH1 - AF2) */
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  GPIO_InitTypeDef GPIO_InitStructEcho = {0};
+  GPIO_InitStructEcho.Pin = GPIO_PIN_6;
+  GPIO_InitStructEcho.Mode = GPIO_MODE_AF_PP;    // Mode Alternate Function
+  GPIO_InitStructEcho.Pull = GPIO_NOPULL;
+  GPIO_InitStructEcho.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStructEcho.Alternate = GPIO_AF2_TIM3; // Hubungkan ke TIM3
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStructEcho);
+
   /* Mulai PWM untuk Servo di TIM4 Channel 3 */
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
+
+  /* Mulai timer 3 untuk HC-SR04 (1 MHz = 1 tick per 1 mikrodetik) */
+  HAL_TIM_Base_Start(&htim3);
+  HAL_TIM_IC_Start(&htim3, TIM_CHANNEL_1); // Polling mode untuk baca Echo
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -231,6 +253,80 @@ int main(void)
           servo_step = 0;
           break;
       }
+    }
+
+    /* USER CODE BEGIN 3 */
+
+    /* ============================================================
+     * Sensor HC-SR04 (Non-Blocking Polling dengan State Machine)
+     * ============================================================ */
+    switch (hcsr04_state) {
+      case 0: /* IDLE: Tunggu 100ms untuk pembacaan berikutnya */
+        if ((current_tick - hcsr04_last_tick) >= 150) {
+          hcsr04_last_tick = current_tick;
+
+          /* Berikan sinyal HIGH ke pin Trigger */
+          HAL_GPIO_WritePin(GPIOA, TRIG_PIN_Pin, GPIO_PIN_SET);
+          hcsr04_trig_start = __HAL_TIM_GET_COUNTER(&htim3);
+          hcsr04_state = 1;
+        }
+        break;
+
+      case 1: /* TRIGGERING: Tahan Trigger tetap HIGH minimal 10us */
+        if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_trig_start) >= 10) {
+          /* Turunkan sinyal Trigger menjadi LOW */
+          HAL_GPIO_WritePin(GPIOA, TRIG_PIN_Pin, GPIO_PIN_RESET);
+
+          /* Bersihkan flag Capture dan atur agar sensitif terhadap sinyal NAIK (Rising Edge) */
+          __HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_CC1);
+          __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_RISING);
+          hcsr04_state = 2;
+        }
+        break;
+
+      case 2: /* WAIT RISING: Tunggu sinyal Echo menjadi HIGH dari sensor */
+        if (__HAL_TIM_GET_FLAG(&htim3, TIM_FLAG_CC1)) {
+          /* Simpan waktu saat sinyal mulai HIGH */
+          hcsr04_ic_val1 = HAL_TIM_ReadCapturedValue(&htim3, TIM_CHANNEL_1);
+
+          /* Ubah sensitivitas untuk membaca sinyal TURUN (Falling Edge) */
+          __HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_CC1);
+          __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_FALLING);
+          hcsr04_state = 3;
+        }
+        /* Timeout Protection (~50ms) jika terjadi error (misal kabel lepas) */
+        else if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_trig_start) > 50000) {
+          hcsr04_state = 0;
+        }
+        break;
+
+      case 3: /* WAIT FALLING: Tunggu sinyal Echo kembali LOW */
+        if (__HAL_TIM_GET_FLAG(&htim3, TIM_FLAG_CC1)) {
+          hcsr04_ic_val2 = HAL_TIM_ReadCapturedValue(&htim3, TIM_CHANNEL_1);
+          
+          uint32_t diff = (hcsr04_ic_val2 > hcsr04_ic_val1) ? 
+                          (hcsr04_ic_val2 - hcsr04_ic_val1) : 
+                          (0xFFFF - hcsr04_ic_val1 + hcsr04_ic_val2);
+          
+          uint32_t raw_dist = diff / 58;
+          if (raw_dist > 400) raw_dist = 400;
+
+          /* Filter yang lebih agresif untuk menahan drift */
+          static uint32_t f_dist = 0;
+          if (f_dist == 0) f_dist = raw_dist;
+          
+          // Menggunakan pembagian bit shift (>>2) atau (>>3) lebih cepat dari pembagian biasa
+          // Rumus: 90% lama + 10% baru
+          f_dist = ((f_dist * 9) + raw_dist) / 10;
+          
+          distance_cm = f_dist;
+          hcsr04_state = 0;
+        }
+        /* Timeout Protection jika sensor out of range */
+        else if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_ic_val1) > 30000) {
+          hcsr04_state = 0;
+        }
+        break;
     }
 
     /* ============================================================
@@ -291,8 +387,10 @@ int main(void)
     }
 
     /* ============================================================
-     * Eksekusi mode aktif
+     * Eksekusi mode aktif (NON-BLOCKING)
      * ============================================================ */
+    static uint32_t mode_last_tick = 0;
+    
     switch (current_mode)
     {
       /* ----------------------------------------------------------
@@ -302,16 +400,12 @@ int main(void)
        * ---------------------------------------------------------- */
       case 1:
       {
-        /* step 0-7: LED8..LED1 menyala satu per satu (Bergeser dari kanan ke kiri)
-         * step 8  : semua mati, lalu mulai ulang */
-        if (shift_pos < 8) {
-          /* LED8 ada di LSB (0x01), bergeser ke kiri hingga LED1 (0x80) */
-          set_leds((uint8_t)(1u << shift_pos));
-        } else {
-          set_leds(0x00);
+        if (current_tick - mode_last_tick >= SHIFT_DELAY_MS) {
+          mode_last_tick = current_tick;
+          if (shift_pos < 8) set_leds((uint8_t)(1u << shift_pos));
+          else set_leds(0x00);
+          shift_pos = (shift_pos + 1) % 9;
         }
-        shift_pos = (shift_pos + 1) % 9;
-        HAL_Delay(SHIFT_DELAY_MS);
         break;
       }
 
@@ -324,14 +418,15 @@ int main(void)
        * ---------------------------------------------------------- */
       case 2:
       {
-        all_leds_off();
-
-        uint32_t target = (counter_phase == 0) ? MY_LAST2 : PARTNER_LAST2;
-        HAL_Delay(COUNTER_DELAY_MS);
-        counter_value++;
-        if (counter_value > target) {
-          counter_value = 0;
-          counter_phase ^= 1u;
+        if (current_tick - mode_last_tick >= COUNTER_DELAY_MS) {
+          mode_last_tick = current_tick;
+          all_leds_off();
+          uint32_t target = (counter_phase == 0) ? MY_LAST2 : PARTNER_LAST2;
+          counter_value++;
+          if (counter_value > target) {
+            counter_value = 0;
+            counter_phase ^= 1u;
+          }
         }
         break;
       }
@@ -346,29 +441,20 @@ int main(void)
        * ---------------------------------------------------------- */
       case 3:
       {
-        static uint32_t filtered_adc = 0;
-        /* Filtering (Exponential Moving Average) untuk menstabilkan pembacaan adc */
-        filtered_adc = (filtered_adc * 7 + adc_dma_val) / 8;
-        
-        /* Putar kanan = ADC menurun = LED bertambah, maka kita invert nilainya. */
-        uint32_t logical_adc = 4095 - filtered_adc;
-
-        /* Deadzone bawah dinaikkan dari 10 ke 100 untuk menghilangkan noise bawah sehingga kiri bisa mati */
-        if (logical_adc <= 100) {
-          led_count = 0;
-        } else if (logical_adc >= 4000) {
-          led_count = 8;
-        } else {
-          led_count = (logical_adc * 8u) / 4095u;
-          if (led_count == 0) led_count = 1; 
+        if (current_tick - mode_last_tick >= ADC_POLL_MS) {
+          mode_last_tick = current_tick;
+          static uint32_t filtered_adc = 0;
+          filtered_adc = (filtered_adc * 7 + adc_dma_val) / 8;
+          uint32_t logical_adc = 4095 - filtered_adc;
+          if (logical_adc <= 100) led_count = 0;
+          else if (logical_adc >= 4000) led_count = 8;
+          else {
+            led_count = (logical_adc * 8u) / 4095u;
+            if (led_count == 0) led_count = 1; 
+          }
+          uint8_t pattern = (led_count == 0) ? 0x00 : (uint8_t)(0xFF00u >> led_count);
+          set_leds(pattern);
         }
-
-        /* Konversi led_count ke pattern dari kiri (LED1, MSB) merayap ke kanan.
-         * Misal: count 1 = 0x80 (10000000), count 2 = 0xC0 (11000000) */
-        uint8_t pattern = (led_count == 0) ? 0x00 : (uint8_t)(0xFF00u >> led_count);
-        set_leds(pattern);
-        
-        HAL_Delay(ADC_POLL_MS);
         break;
       }
 
@@ -384,38 +470,17 @@ int main(void)
        * ---------------------------------------------------------- */
       case 4:
       {
-        /* 14-langkah animasi kereta: terbentuk -> bertabrakan -> berpencar
-         *
-         * step  0: ○○○○○○○○  semua mati (awal siklus)
-         * step  1: ●○○○○○○●  1 LED tiap sisi
-         * step  2: ●●○○○○●●  2 LED tiap sisi
-         * step  3: ●●●○○●●●  3 LED tiap sisi (kereta terbentuk penuh)
-         * step  4: ○●●●●●●○  bergerak ke tengah
-         * step  5: ○○●●●●○○  semakin dekat
-         * step  6: ○○○●●○○○  tabrakan — menyatu di tengah
-         * step  7: ○○○○○○○○  semua mati (puncak tabrakan)
-         * step  8: ○○○●●○○○  muncul kembali di tengah
-         * step  9: ○○●●●●○○  berpencar keluar
-         * step 10: ○●●●●●●○  semakin menjauh
-         * step 11: ●●●○○●●●  kereta kiri tiba di kanan & sebaliknya
-         * step 12: ●●○○○○●●  menghilang — 2 LED
-         * step 13: ●○○○○○○●  menghilang — 1 LED
-         */
-        static const uint8_t pat[14] = {
-            0x00, 0x81, 0xC3, 0xE7,  /* step  0- 3 */
-            0x7E, 0x3C, 0x18, 0x00,  /* step  4- 7 */
-            0x18, 0x3C, 0x7E, 0xE7,  /* step  8-11 */
-            0xC3, 0x81               /* step 12-13 */
-        };
-
-        uint32_t adc      = adc_dma_val;
-        /* Putar kanan = ADC turun = delay memendek (semakin cepat) */
-        uint32_t delay_ms = 50u + (adc * 450u / 4095u);  /* 50..500 ms */
-
-        set_leds(pat[train_step]);
-        HAL_Delay(delay_ms);
-
-        train_step = (train_step + 1u) % 14u;
+        uint32_t adc = adc_dma_val;
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
+        if (current_tick - mode_last_tick >= delay_ms) {
+          mode_last_tick = current_tick;
+          static const uint8_t pat[14] = {
+              0x00, 0x81, 0xC3, 0xE7, 0x7E, 0x3C, 0x18, 0x00,
+              0x18, 0x3C, 0x7E, 0xE7, 0xC3, 0x81
+          };
+          set_leds(pat[train_step]);
+          train_step = (train_step + 1u) % 14u;
+        }
         break;
       }
 
@@ -431,14 +496,13 @@ int main(void)
        * ---------------------------------------------------------- */
       case 5:
       {
-        uint32_t adc      = adc_dma_val;
-        /* Putar kanan = ADC turun = delay memendek (semakin cepat) */
-        uint32_t delay_ms = 50u + (adc * 450u / 4095u);  /* 50..500 ms */
-
-        set_leds(binary_count);
-        HAL_Delay(delay_ms);
-
-        binary_count++;   /* uint8_t wraps 255 -> 0 secara otomatis */
+        uint32_t adc = adc_dma_val;
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
+        if (current_tick - mode_last_tick >= delay_ms) {
+          mode_last_tick = current_tick;
+          set_leds(binary_count);
+          binary_count++;
+        }
         break;
       }
 
@@ -450,21 +514,15 @@ int main(void)
        * ---------------------------------------------------------- */
       case 6:
       {
-        uint32_t adc      = adc_dma_val;
-        /* Putar kanan = ADC turun = delay memendek (semakin cepat) */
-        uint32_t delay_ms = 50u + (adc * 450u / 4095u);  /* 50..500 ms */
-
-        /* Shift ke kanan (menjauhi MSB/LED1) agar secara visual bergerak dari LED1 ke LED8 */
-        if (mode6_step == 0) {
-          mode6_pattern = (mode6_pattern >> 1) | 0x80u;
-        } else {
-          mode6_pattern = (mode6_pattern >> 1);
+        uint32_t adc = adc_dma_val;
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
+        if (current_tick - mode_last_tick >= delay_ms) {
+          mode_last_tick = current_tick;
+          if (mode6_step == 0) mode6_pattern = (mode6_pattern >> 1) | 0x80u;
+          else mode6_pattern = (mode6_pattern >> 1);
+          set_leds(mode6_pattern);
+          mode6_step = (mode6_step + 1) % 3;
         }
-        
-        set_leds(mode6_pattern);
-        
-        mode6_step = (mode6_step + 1) % 3;
-        HAL_Delay(delay_ms);
         break;
       }
 
@@ -508,23 +566,32 @@ int main(void)
         break;
     }
 
-    // Siapkan buffer yang lebih besar untuk menampung semua data
-    char buffer[150];
+    /* ============================================================
+     * Kirim data ke USB CDC tiap 100ms
+     * ============================================================ */
+    static uint32_t usb_last_tick = 0;
+    if (current_tick - usb_last_tick >= 200) {
+      usb_last_tick = current_tick;
 
-    // Memformat semua variabel penting ke dalam format JSON agar dapat dibaca oleh website
-    uint16_t len = snprintf(buffer, sizeof(buffer),
-      "{\"mode\":%d,\"adc\":%lu,\"cnt\":%lu,\"leds\":%lu,\"shift\":%d,\"train\":%d,\"bin\":%d,\"m6_pat\":%u}\r\n",
-      current_mode,
-      adc_dma_val,
-      counter_value,
-      led_count,
-      shift_pos,
-      train_step,
-      binary_count,
-      mode6_pattern);
+      // Siapkan buffer yang lebih besar untuk menampung semua data
+      char buffer[150];
 
-    // Kirim data menggunakan USB CDC (Bukan UART2)
-    CDC_Transmit_FS((uint8_t*)buffer, len);
+      // Memformat semua variabel penting ke dalam format JSON agar dapat dibaca oleh website
+      uint16_t len = snprintf(buffer, sizeof(buffer),
+        "{\"mode\":%d,\"adc\":%lu,\"cnt\":%lu,\"leds\":%lu,\"shift\":%d,\"train\":%d,\"bin\":%d,\"m6_pat\":%u,\"dist\":%lu}\r\n",
+        current_mode,
+        adc_dma_val,
+        counter_value,
+        led_count,
+        shift_pos,
+        train_step,
+        binary_count,
+        mode6_pattern,
+        distance_cm);
+
+      // Kirim data menggunakan USB CDC
+      CDC_Transmit_FS((uint8_t*)buffer, len);
+    }
 
   }
   /* USER CODE END 3 */
