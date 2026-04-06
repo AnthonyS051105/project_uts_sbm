@@ -132,6 +132,27 @@ static void MX_TIM2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#include <string.h>
+#include <stdlib.h>
+
+volatile uint8_t usb_cmd_ready = 0;
+char usb_cmd_buffer[64];
+volatile uint8_t web_force_led_mode = 0; /* 0=none, 1=all OFF, 2=all ON */
+
+void Process_USB_Command(uint8_t* buf, uint32_t len) {
+    static uint32_t idx = 0;
+    for (uint32_t i = 0; i < len; i++) {
+        if (buf[i] == '\n' || buf[i] == '\r') {
+            usb_cmd_buffer[idx] = '\0';
+            if (idx > 0) usb_cmd_ready = 1;
+            idx = 0;
+        } else {
+            if (idx < sizeof(usb_cmd_buffer) - 1) {
+                usb_cmd_buffer[idx++] = buf[i];
+            }
+        }
+    }
+}
 
 /* Override BinaryGame_UART_Transmit → kirim via USB CDC */
 void BinaryGame_UART_Transmit(const char *buf, uint16_t len)
@@ -158,6 +179,9 @@ static const LED_t leds[8] = {
  */
 static void set_leds(uint8_t pattern)
 {
+    if (web_force_led_mode == 1) pattern = 0x00;
+    else if (web_force_led_mode == 2) pattern = 0xFF;
+
     current_led_mask = pattern;
     for (int i = 0; i < 8; i++) {
         HAL_GPIO_WritePin(leds[i].port, leds[i].pin,
@@ -261,6 +285,51 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
     uint32_t current_tick = HAL_GetTick();
+
+    /* ============================================================
+     * Proses USB Command dari Website/Python
+     * ============================================================ */
+    if (usb_cmd_ready) {
+      usb_cmd_ready = 0;
+      if (strncmp(usb_cmd_buffer, "MODE:", 5) == 0) {
+        uint8_t m = atoi(&usb_cmd_buffer[5]);
+        if (m >= 1 && m <= 9) {
+          current_mode = m;
+          shift_pos     = 0;
+          counter_value = 0;
+          counter_phase = 0;
+          train_step    = 0;
+          binary_count  = 0;
+          mode6_step    = 0;
+          mode6_pattern = 0;
+          web_force_led_mode = 0; /* Kembalikan kontrol LED ke per-mode */
+          
+          if (m == 8) {
+            game_lobby = 1;
+            game_start_pending = 1; // langsung start rhythm game
+          } else if (m == 9) {
+            game_lobby = 2;
+            game_start_pending = 1; // langsung start binary game
+          } else {
+            game_lobby = 0;
+            game_start_pending = 0;
+          }
+          all_leds_off(); // panggil ini agar mereset current_led_mask sesuai override (0x00)
+        }
+      } else if (strcmp(usb_cmd_buffer, "ISR") == 0) {
+        web_force_led_mode = 0; // Kembalikan kontrol LED statis saat ISR!
+        btn2_flag = 1;
+      } else if (strcmp(usb_cmd_buffer, "LED:FF") == 0) {
+        web_force_led_mode = 2; // Paksa semua LED NYALA
+        all_leds_on();
+      } else if (strcmp(usb_cmd_buffer, "LED:00") == 0) {
+        web_force_led_mode = 1; // Paksa semua LED MATI
+        all_leds_off();
+      } else if (strcmp(usb_cmd_buffer, "RESET") == 0) {
+        RhythmGame_Reset();
+        BinaryGame_Reset();
+      }
+    }
 
     /* ============================================================
      * Kontrol Servo SG90 otomatis (0° -> 90° -> 180°) — Mode 1–6
@@ -368,6 +437,7 @@ int main(void)
         binary_count  = 0;
         mode6_step    = 0;
         mode6_pattern = 0;
+        web_force_led_mode = 0;
         RhythmGame_Reset();
         BinaryGame_Reset();
         all_leds_off();
@@ -376,6 +446,7 @@ int main(void)
         current_mode = MODE_LOBBY;
         game_lobby   = 0;
         btn2_first_click_pending = 0;
+        web_force_led_mode = 0;
         all_leds_off();
       }
     }
@@ -387,9 +458,12 @@ int main(void)
      * ============================================================ */
     if (btn2_flag && current_mode < 8) {
       btn2_flag = 0;
+      uint8_t prev_force = web_force_led_mode;
+      web_force_led_mode = 0;
       all_leds_on();
       HAL_Delay(5000);
       all_leds_off();
+      web_force_led_mode = prev_force; /* Kembalikan ke mode statis jika sebelumnya statis */
     }
 
     /* ============================================================
@@ -406,6 +480,7 @@ int main(void)
       binary_count  = 0;
       mode6_step    = 0;
       mode6_pattern = 0;
+      web_force_led_mode = 0;
       all_leds_off();
     }
 
