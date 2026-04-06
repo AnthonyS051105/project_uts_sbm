@@ -108,6 +108,8 @@ uint8_t mode6_pattern = 0;
 volatile uint8_t simultaneous_flag  = 0; /* set jika BTN1+BTN2 ditekan bersamaan */
 volatile uint8_t game_lobby         = 0; /* 1=game1(rhythm) dipilih, 2=game2(binary) dipilih */
 volatile uint8_t game_start_pending = 0; /* BTN2 double-click di lobby → mulai game */
+volatile uint8_t btn2_first_click_pending = 0; /* defer single click btn2 di lobby */
+volatile uint32_t btn2_first_click_tick   = 0; /* timestamp untuk btn2 defer */
 
 /* ---- Sensor DHT11 ---- */
 DHT_t    dht11;
@@ -370,11 +372,11 @@ int main(void)
         BinaryGame_Reset();
         all_leds_off();
       } else {
-        /* Masuk ke lobby: game 1 (rhythm) dipilih, game belum dimulai */
+        /* Masuk ke lobby: belum ada game yang dipilih, semua LED padam */
         current_mode = MODE_LOBBY;
-        game_lobby   = 1;
+        game_lobby   = 0;
+        btn2_first_click_pending = 0;
         all_leds_off();
-        HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
       }
     }
 
@@ -408,14 +410,42 @@ int main(void)
     }
 
     /* ============================================================
+     * Timeout pendeteksi tekan BTN2 sekali untuk memilih Binary Game
+     * ============================================================ */
+    if (current_mode == MODE_LOBBY && btn2_first_click_pending) {
+      if (HAL_GetTick() - btn2_first_click_tick > 400) {
+        btn2_first_click_pending = 0;
+        game_lobby = 2;
+        all_leds_off();
+        HAL_GPIO_WritePin(LED7_GPIO_Port, LED7_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
+      }
+    }
+
+    /* ============================================================
      * Mulai game: countdown LED9→LED10→LED11 ("3,2,1") + buzzer,
      * lalu jalankan game yang dipilih di lobby.
      * ============================================================ */
     if (game_start_pending) {
       game_start_pending = 0;
       uint8_t sel = game_lobby;
+      /* Set mode sebelum countdown agar UI React mulai render & hitung mundur bareng MCU */
+      current_mode = (sel == 1) ? 8 : 9;
       game_lobby = 0;
       all_leds_off();
+      
+      // Kirim satu frame JSON langsung ke USB / serial (force) agar UI bisa mulai countdown 3..2..1
+      {
+        char buffer[230];
+        uint32_t c_score = (sel == 2) ? BinaryGame_GetScore() : rg.score;
+        uint8_t c_lives  = (sel == 2) ? 0 : rg.lives;
+
+        uint16_t len = snprintf(buffer, sizeof(buffer),
+          "{\"mode\":%d,\"gameLobby\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d,\"binaryTarget\":%d,\"binaryRound\":%d,\"rhythmLevel\":%d}\r\n",
+          current_mode, game_lobby, adc_dma_val, counter_value, current_led_mask, distance_cm,
+          (int)dht11_temp, (int)dht11_hum, c_score, (int)c_lives, (int)BinaryGame_GetTarget(), (int)BinaryGame_GetRound(), (int)RhythmGame_GetLevel());
+        CDC_Transmit_FS((uint8_t*)buffer, len);
+      }
 
       /* Countdown "3" — LED11 menyala, satu beep */
       HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_SET);
@@ -443,12 +473,10 @@ int main(void)
 
       all_leds_off();
 
-      /* Jalankan game yang dipilih */
+      /* Inisialisasi game yang dipilih */
       if (sel == 1) {
-        current_mode = 8;
         RhythmGame_Init();
       } else {
-        current_mode = 9;
         BinaryGame_Init();
       }
     }
@@ -623,19 +651,40 @@ int main(void)
       }
 
       /* ----------------------------------------------------------
-       * MODE 8: Rhythm Tap Game (Fase 1)
-       * Keluar dengan menekan BTN1+BTN2 bersamaan (kembali ke lobby).
+       * MODE 8: Rhythm Tap Game
+       * Keluar manual : BTN1+BTN2 bersamaan → Mode 1.
+       * Keluar otomatis: setelah GAME_OVER → kembali ke lobby (Mode 10).
        * ---------------------------------------------------------- */
       case 8:
-        RhythmGame_Run();
+        if (rg_session_done) {
+          rg_session_done = 0;
+          /* Kembali ke lobby dengan pilihan rhythm (LED8 menyala) */
+          current_mode = MODE_LOBBY;
+          game_lobby   = 1;
+          all_leds_off();
+          HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
+        } else {
+          RhythmGame_Run();
+        }
         break;
 
       /* ----------------------------------------------------------
-       * MODE 9: Game Konversi Biner (Fase 2)
-       * Keluar dengan menekan BTN1+BTN2 bersamaan.
+       * MODE 9: Game Konversi Biner
+       * Keluar manual : BTN1+BTN2 bersamaan → Mode 1.
+       * Keluar otomatis: setelah BG_MAX_ROUNDS soal → kembali ke lobby (Mode 10).
        * ---------------------------------------------------------- */
       case 9:
-        BinaryGame_Run();
+        if (bg_session_done) {
+          bg_session_done = 0;
+          /* Kembali ke lobby dengan pilihan binary (LED7+LED8 menyala) */
+          current_mode = MODE_LOBBY;
+          game_lobby   = 2;
+          all_leds_off();
+          HAL_GPIO_WritePin(LED7_GPIO_Port, LED7_Pin, GPIO_PIN_SET);
+          HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
+        } else {
+          BinaryGame_Run();
+        }
         break;
 
       /* ----------------------------------------------------------
@@ -669,21 +718,28 @@ int main(void)
       usb_last_tick = current_tick;
 
       // Siapkan buffer untuk semua data termasuk DHT11
-      char buffer[200];
+      char buffer[220];
 
       // Format JSON — field names sesuai dengan STM32Data di dashboard
       // Gunakan %d (integer) agar tidak perlu linker flag -u _printf_float
+      uint32_t current_score = (current_mode == 9 || game_lobby == 2) ? BinaryGame_GetScore() : rg.score;
+      uint8_t current_lives  = (current_mode == 9 || game_lobby == 2) ? 0 : rg.lives;
+
       uint16_t len = snprintf(buffer, sizeof(buffer),
-        "{\"mode\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d}\r\n",
+        "{\"mode\":%d,\"gameLobby\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d,\"binaryTarget\":%d,\"binaryRound\":%d,\"rhythmLevel\":%d}\r\n",
         current_mode,
+        game_lobby,
         adc_dma_val,
         counter_value,
         current_led_mask,
         distance_cm,
         (int)dht11_temp,
         (int)dht11_hum,
-        rg.score,
-        (int)rg.lives);
+        current_score,
+        (int)current_lives,
+        (int)BinaryGame_GetTarget(),
+        (int)BinaryGame_GetRound(),
+        (int)RhythmGame_GetLevel());
 
       // Kirim data menggunakan USB CDC
       CDC_Transmit_FS((uint8_t*)buffer, len);
@@ -1028,9 +1084,18 @@ static void MX_GPIO_Init(void)
  *   (atau sebaliknya), set simultaneous_flag dan batalkan flag tombol tunggal.
  *   Ini memungkinkan toggle Mode Game tanpa salah terpicu sebagai mode-change.
  *
- * Di Mode Game (current_mode == MODE_GAME):
+ * Di Mode Lobby (current_mode == MODE_LOBBY):
+ *   BTN1          → pilih Rhythm Tap  (LED8 menyala)
+ *   BTN2 (slow)   → pilih Tebak Biner (LED7+LED8 menyala), hanya jika belum ada pilihan
+ *   BTN2×2 (<400ms) → mulai game yang dipilih (game_start_pending = 1)
+ *
+ * Di Mode Game (current_mode == 8 / Rhythm):
  *   BTN1 → RhythmGame_BTN1_Tap()   (rekam timestamp ketukan)
  *   BTN2 → RhythmGame_BTN2_Press() (set flag ulang demo / hint)
+ *
+ * Di Mode Game (current_mode == 9 / Binary):
+ *   BTN1 → BinaryGame_BTN1_Press() (input bit '1')
+ *   BTN2 → BinaryGame_BTN2_Press() (input bit '0')
  */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -1042,7 +1107,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
   if (GPIO_Pin == BTN1_Pin) {
     if ((now - btn1_last_tick) > DEBOUNCE_MS) {
-      uint32_t diff = now - btn1_last_tick;
       btn1_last_tick = now;
 
       if ((now - btn2_last_tick) < SIMULTANEOUS_MS) {
@@ -1050,22 +1114,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         btn2_flag = 0;
         simultaneous_flag = 1;
       } else if (current_mode == MODE_LOBBY) {
-        if (diff < 400) {
-          /* Double click di lobby: ganti pilihan game */
-          if (game_lobby == 1) {
-            game_lobby = 2;
-            all_leds_off();
-            HAL_GPIO_WritePin(LED7_GPIO_Port, LED7_Pin, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
-          } else {
-            game_lobby = 1;
-            all_leds_off();
-            HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
-          }
-        }
-      } else if (current_mode == 8) {
+        /* Single click: pilih Rhythm Tap → LED8 menyala */
+        game_lobby = 1;
+        btn2_first_click_pending = 0;
+        all_leds_off();
+        HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
+      } else if (current_mode == 8 && !rg_session_done) {
         RhythmGame_BTN1_Tap();
-      } else if (current_mode == 9) {
+      } else if (current_mode == 9 && !bg_session_done) {
         BinaryGame_BTN1_Press();
       } else {
         btn1_flag = 1;
@@ -1083,13 +1139,20 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         btn1_flag = 0;
         simultaneous_flag = 1;
       } else if (current_mode == MODE_LOBBY) {
-        if (diff < 400) {
-          /* Double click di lobby: mulai game dengan countdown 3-2-1 */
-          game_start_pending = 1;
+        if (diff < 400 && btn2_first_click_pending) {
+          /* Double click: mulai game yang dipilih (jika sudah ada pilihan) */
+          btn2_first_click_pending = 0;
+          if (game_lobby != 0) {
+            game_start_pending = 1;
+          }
+        } else {
+          /* Single click: tahan dulu (defer) selama 400ms */
+          btn2_first_click_pending = 1;
+          btn2_first_click_tick = now;
         }
-      } else if (current_mode == 8) {
+      } else if (current_mode == 8 && !rg_session_done) {
         RhythmGame_BTN2_Press();
-      } else if (current_mode == 9) {
+      } else if (current_mode == 9 && !bg_session_done) {
         BinaryGame_BTN2_Press();
       } else {
         btn2_flag = 1;

@@ -24,6 +24,8 @@
 #include <string.h>
 #include <stdio.h>
 
+void RhythmGame_UART_Transmit(const char *buf, uint16_t len);
+
 /* ================================================================== *
  *  LED helper                                                          *
  * ================================================================== */
@@ -66,6 +68,13 @@ RhythmGame_t rg;
 /* Flag B2 dari ISR, dicek di state INPUT */
 static volatile uint8_t rg_btn2_flag = 0;
 
+/**
+ * Di-set ke 1 setelah animasi GAME_OVER selesai.
+ * Main.c harus cek flag ini dan kembali ke lobby; jangan panggil
+ * RhythmGame_Run() lagi sampai RhythmGame_Init() dipanggil ulang.
+ */
+volatile uint8_t rg_session_done = 0;
+
 /* ================================================================== *
  *  Buzzer helpers                                                      *
  * ================================================================== */
@@ -84,9 +93,6 @@ static void buzzer_beep(uint32_t on_ms)
  */
 static void buzzer_correct_perfect(void)
 {
-    buzzer_beep(80);
-    HAL_Delay(60);
-    buzzer_beep(120);
 }
 
 /**
@@ -94,7 +100,6 @@ static void buzzer_correct_perfect(void)
  */
 static void buzzer_correct_near(void)
 {
-    buzzer_beep(200);
 }
 
 /**
@@ -102,7 +107,6 @@ static void buzzer_correct_near(void)
  */
 static void buzzer_wrong(void)
 {
-    buzzer_beep(500);
 }
 
 /* ================================================================== *
@@ -126,36 +130,52 @@ static void rg_play_demo(void)
 
     for (uint8_t i = 0; i < rg.pat_len; i++) {
         rg_set_leds(0xFF);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
         HAL_Delay(on_ms);
         rg_set_leds(0x00);
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
         HAL_Delay(off_ms);
     }
 }
 
 /**
- * Sinyal siap: hitung mundur "3 - 2 - 1 - GO!" dengan LED + buzzer.
- *   Setiap hitungan: LED ON + beep pendek 100 ms → LED OFF → jeda 700 ms
- *   "GO!": LED ON + beep panjang 400 ms → LED OFF → jeda 200 ms
+ * Sinyal siap: hitung mundur "3..2..1"
+ *   "3": LED9 ON + beep sangat pendek (50ms)
+ *   "2": LED10 ON + beep sangat pendek (50ms)
+ *   "1": LED11 ON + beep panjang (400ms) = GO!
  */
 static void rg_ready_signal(void)
 {
-    /* "3", "2", "1" */
-    for (int i = 0; i < 3; i++) {
-        rg_set_leds(0xFF);
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-        HAL_Delay(100);
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-        HAL_Delay(200);     /* LED masih nyala 200 ms lagi */
-        rg_set_leds(0x00);
-        HAL_Delay(500);     /* jeda sebelum hitungan berikutnya */
-    }
-    /* "GO!" */
-    rg_set_leds(0xFF);
+    /* "3" */
+    HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-    HAL_Delay(400);
+    HAL_Delay(50);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-    rg_set_leds(0x00);
-    HAL_Delay(200);
+    HAL_Delay(450);
+    HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_RESET);
+    HAL_Delay(500);
+
+    /* "2" */
+    HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+    HAL_Delay(50);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+    HAL_Delay(450);
+    HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_RESET);
+    HAL_Delay(500);
+
+    /* PENTING: Buka pintu input SEBELUM bunyi GO!
+       sehingga tap saat GO! (ketika pengguna reaktif) tidak digugurkan */
+    rg.state = RG_INPUT;
+    rg.input_start = HAL_GetTick();
+
+    /* "1" (GO!) */
+    HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+    HAL_Delay(400);     /* buzzer panjang penanda GO */
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_RESET);
 }
 
 /**
@@ -269,9 +289,9 @@ static void rg_level_up_anim(void)
     uint32_t beep_dur[3] = {80, 120, 200}; /* durasi naik = ascending feel */
     for (int i = 0; i < 3; i++) {
         rg_set_leds(pat);
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
         HAL_Delay(beep_dur[i]);
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+        // HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
         HAL_Delay(300 - beep_dur[i]);   /* sisa LED on */
         rg_set_leds(0x00);
         HAL_Delay(300);
@@ -286,13 +306,19 @@ static void rg_level_up_anim(void)
  */
 static void rg_game_over_anim(void)
 {
+    /* Kirim SESSION_END ke python bridge / dashboard */
+    char buf[64];
+    uint16_t len = (uint16_t)snprintf(buf, sizeof(buf),
+        "RHYTHM,SESSION_END,SCORE:%lu\r\n", rg.score);
+    RhythmGame_UART_Transmit(buf, len);
+
     /* 3 beep descending sebagai penanda kalah */
     uint32_t beep_dur[3] = {400, 250, 100};
     for (int i = 0; i < 3; i++) {
         rg_set_leds(0xFF);
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+        // HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
         HAL_Delay(beep_dur[i]);
-        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+        // HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
         rg_set_leds(0x00);
         HAL_Delay(150);
     }
@@ -358,10 +384,11 @@ static void rg_send_uart_result(void)
 void RhythmGame_Init(void)
 {
     memset(&rg, 0, sizeof(rg));
-    rg.state  = RG_IDLE;
-    rg.level  = 1;
-    rg.lives  = 3;
-    rg_btn2_flag = 0;
+    rg.state     = RG_IDLE;
+    rg.level     = 1;
+    rg.lives     = 3;
+    rg_btn2_flag  = 0;
+    rg_session_done = 0;
     rg_set_leds(0x00);
 }
 
@@ -370,12 +397,22 @@ void RhythmGame_Reset(void)
     RhythmGame_Init();
 }
 
+uint8_t RhythmGame_GetLevel(void)
+{
+    return rg.level;
+}
+
 /** Dipanggil dari ISR — rekam timestamp ketukan BTN1. */
 void RhythmGame_BTN1_Tap(void)
 {
     if (rg.state != RG_INPUT) return;
 
     uint32_t now = HAL_GetTick();
+    /* Sinkronkan fase (titik 0 ms) di ketukan PERTAMA pemain */
+    if (rg.tap_count == 0) {
+        rg.input_start = now;
+    }
+
     if (rg.tap_count < rg.pat_len) {
         rg.tap_ts[rg.tap_count++] = now;
     } else {
@@ -424,29 +461,35 @@ void RhythmGame_Run(void)
             rg.tap_count  = 0;
             rg.extra_taps = 0;
             rg_btn2_flag  = 0;
+
+            /* Tunda sebentar sebelum demo mulai */
+            HAL_Delay(500);
             rg_play_demo();
+            /* Jeda 1 detik agar suara demo dan aba-aba terpisah jelas */
+            HAL_Delay(1000);
+
             rg.state = RG_READY;
             break;
 
         /* ---------------------------------------------------------- */
         case RG_READY:
-            rg_ready_signal();
-            rg.input_start = HAL_GetTick();
             rg.tap_count   = 0;
             rg.extra_taps  = 0;
-            rg.state = RG_INPUT;
+            rg_ready_signal(); /* rg.state = RG_INPUT di-set di dalam ini sebelum beep GO */
             break;
 
         /* ---------------------------------------------------------- */
         case RG_INPUT: {
             /*
              * Non-blocking: hanya cek kondisi lalu return.
-             * Deadline = start + (pat_len + 1) × beat_ms
-             * (+1 beat sebagai toleransi ketukan terakhir)
+             * Jika belum ada aksi sama sekali, waktu tunggu panjang: 5 detik.
+             * Jika ketukan pertama sudah terjadi, batas waktu dinamik:
+             * start + pat_len × beat_ms + 0.5 beat untuk toleransi.
              */
             uint32_t now      = HAL_GetTick();
-            uint32_t deadline = rg.input_start
-                               + ((uint32_t)rg.pat_len + 1u) * rg.beat_ms;
+            uint32_t deadline = (rg.tap_count == 0)
+                               ? (rg.input_start + 5000u)
+                               : (rg.input_start + ((uint32_t)rg.pat_len * rg.beat_ms) + (rg.beat_ms / 2u));
 
             /* B2 ditekan → ulang demo (hint), skor tidak direset */
             if (rg_btn2_flag) {
@@ -487,22 +530,30 @@ void RhythmGame_Run(void)
             /* Kirim data ke CubeMonitor */
             rg_send_uart_result();
 
-            /* Streak miss ≥3 ronde → nyawa berkurang */
-            rg.miss_streak = (miss_cnt > 0) ? rg.miss_streak + 1u : 0u;
+            uint32_t acc = (uint32_t)hit_cnt * 100u / rg.pat_len;
 
-            if (rg.miss_streak >= 3u) {
-                rg.miss_streak = 0;
+            /* Setiap ada MISS atau akurasi < 70%, nyawa seketika berkurang 1 */
+            if (miss_cnt > 0u || acc < 70u || rg.extra_taps > 0) {
                 if (rg.lives > 0u) rg.lives--;
-                rg.state = (rg.lives == 0u) ? RG_GAME_OVER : RG_DEMO;
+            }
+
+            if (rg.lives == 0u) {
+                rg.state = RG_GAME_OVER;
                 break;
             }
 
-            /* Level up: akurasi ≥70% DAN tidak ada MISS */
-            uint32_t acc = (uint32_t)hit_cnt * 100u / rg.pat_len;
-            if (miss_cnt == 0u && acc >= 70u) {
-                rg.state = (rg.level < 5u) ? RG_LEVEL_UP : RG_GAME_OVER;
+            /* Main maksimal 5 ronde, maju ronde tiap iterasi baik sukses maupun gagal */
+            if (rg.level < 5u) {
+                if (miss_cnt == 0u && acc >= 70u && rg.extra_taps == 0) {
+                    rg.state = RG_LEVEL_UP;
+                } else {
+                    /* Gagal di level ini, tapi masih lanjut ke level berikutnya tanpa animasi */
+                    rg.level++;
+                    rg.pat_len = LEVEL_LEN[rg.level - 1u];
+                    rg.state = RG_DEMO;
+                }
             } else {
-                rg.state = RG_DEMO; /* ulangi level yang sama */
+                rg.state = RG_GAME_OVER; /* Win / Selesai bermain 5 permainan */
             }
             break;
         }
@@ -518,12 +569,14 @@ void RhythmGame_Run(void)
         /* ---------------------------------------------------------- */
         case RG_GAME_OVER:
             rg_game_over_anim();
-            /* Reset untuk sesi berikutnya */
+            /* Reset state internal agar siap sesi baru jika dipanggil lagi */
             rg.level       = 1;
             rg.score       = 0;
             rg.lives       = 3;
             rg.miss_streak = 0;
             rg.state       = RG_IDLE;
+            /* Beritahu main.c bahwa sesi ini selesai → kembali ke lobby */
+            rg_session_done = 1;
             break;
 
         default:

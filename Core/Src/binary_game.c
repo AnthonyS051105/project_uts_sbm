@@ -31,6 +31,13 @@ static uint8_t bg_score     = 0;  /* jumlah jawaban benar                    */
 static uint8_t bg_round     = 0;  /* nomor round saat ini                    */
 static uint32_t bg_rng      = 0;  /* state pseudo-random LCG                 */
 
+/**
+ * Di-set ke 1 setelah BG_MAX_ROUNDS soal selesai.
+ * Main.c harus cek flag ini dan kembali ke lobby.
+ */
+volatile uint8_t bg_session_done = 0;
+volatile uint8_t bg_process_pending = 0;
+
 /* ================================================================== *
  *  LED mapping — MSB (bit7) = LED1, LSB (bit0) = LED8               *
  * ================================================================== */
@@ -194,12 +201,14 @@ static void bg_new_round(void)
 
 void BinaryGame_Init(void)
 {
-    bg_target    = 0;
-    bg_input     = 0;
-    bg_bit_count = 0;
-    bg_score     = 0;
-    bg_round     = 0;
-    bg_rng       = HAL_GetTick();
+    bg_target       = 0;
+    bg_input        = 0;
+    bg_bit_count    = 0;
+    bg_score        = 0;
+    bg_round        = 0;
+    bg_rng          = HAL_GetTick();
+    bg_session_done = 0;
+    bg_process_pending = 0;
 
     bg_all_leds_off();
     bg_buzzer_off();
@@ -207,38 +216,29 @@ void BinaryGame_Init(void)
     bg_new_round();
 }
 
+uint8_t BinaryGame_GetTarget(void)
+{
+    return bg_target;
+}
+
+uint8_t BinaryGame_GetScore(void)
+{
+    return bg_score;
+}
+
+uint8_t BinaryGame_GetRound(void)
+{
+    return bg_round;
+}
+
 void BinaryGame_Run(void)
 {
-    /* Semua logik diproses lewat BTN callback (interrupt-driven).
-     * Fungsi ini sengaja kosong — dipanggil di main loop setiap iterasi. */
-}
+    /* Dipanggil dari main loop non-interrupt.
+     * Jika 8 bit sudah dimasukkan via ISR, proses hasil di sini.
+     */
+    if (bg_process_pending) {
+        bg_process_pending = 0;
 
-void BinaryGame_Reset(void)
-{
-    bg_target    = 0;
-    bg_input     = 0;
-    bg_bit_count = 0;
-    bg_score     = 0;
-    bg_round     = 0;
-    bg_all_leds_off();
-    bg_buzzer_off();
-}
-
-/* ------------------------------------------------------------------ *
- *  Proses satu bit input                                               *
- * ------------------------------------------------------------------ */
-static void bg_process_bit(uint8_t bit)
-{
-    /* Abaikan jika sudah 8 bit (sedang dalam fase feedback) */
-    if (bg_bit_count >= 8) return;
-
-    bg_input = (bg_input << 1) | (bit & 1u);
-    bg_bit_count++;
-
-    /* Tampilkan progress: bit yang sudah dimasukkan rata kiri di LED */
-    bg_set_leds((uint8_t)(bg_input << (8u - bg_bit_count)));
-
-    if (bg_bit_count == 8) {
         char buf[72];
         uint16_t len;
 
@@ -278,9 +278,64 @@ static void bg_process_bit(uint8_t bit)
             bg_transmit_fmt(buf, len);
         }
 
-        /* Jeda singkat sebelum round baru */
+        /* Jeda singkat sebelum keputusan round baru atau session end */
         HAL_Delay(500);
-        bg_new_round();
+
+        if (bg_round >= BG_MAX_ROUNDS) {
+            /* ---- Sesi selesai: semua BG_MAX_ROUNDS soal sudah dijawab ---- */
+            len = (uint16_t)snprintf(buf, sizeof(buf),
+                "BINARY,SESSION_END,SCORE:%u,ROUNDS:%u\r\n",
+                (unsigned)bg_score, (unsigned)bg_round);
+            bg_transmit_fmt(buf, len);
+
+            /* Animasi akhir sesi: skor biner tampil 2 detik lalu LED padam kiri ke kanan */
+            bg_set_leds(bg_score);
+            HAL_Delay(2000);
+            uint8_t pat = bg_score;
+            for (int i = 0; i < 8; i++) {
+                pat &= (uint8_t)~(0x80u >> i);
+                bg_set_leds(pat);
+                HAL_Delay(120);
+            }
+            bg_all_leds_off();
+
+            /* Beritahu main.c bahwa sesi selesai → kembali ke lobby */
+            bg_session_done = 1;
+        } else {
+            bg_new_round();
+        }
+    }
+}
+
+void BinaryGame_Reset(void)
+{
+    bg_target       = 0;
+    bg_input        = 0;
+    bg_bit_count    = 0;
+    bg_score        = 0;
+    bg_round        = 0;
+    bg_session_done = 0;
+    bg_process_pending = 0;
+    bg_all_leds_off();
+    bg_buzzer_off();
+}
+
+/* ------------------------------------------------------------------ *
+ *  Proses satu bit input                                               *
+ * ------------------------------------------------------------------ */
+static void bg_process_bit(uint8_t bit)
+{
+    /* Abaikan jika sudah 8 bit (sedang dalam fase feedback) */
+    if (bg_bit_count >= 8) return;
+
+    bg_input = (bg_input << 1) | (bit & 1u);
+    bg_bit_count++;
+
+    /* Tampilkan progress: bit yang sudah dimasukkan rata kiri di LED */
+    bg_set_leds((uint8_t)(bg_input << (8u - bg_bit_count)));
+
+    if (bg_bit_count == 8) {
+        bg_process_pending = 1;
     }
 }
 

@@ -42,6 +42,7 @@ typedef struct {
 
 /* Akses state publik (hanya-baca dari luar) */
 extern RhythmGame_t rg;
+extern volatile uint8_t rg_session_done;
 
 /* --- Public API --------------------------------------------------- */
 void RhythmGame_Init(void);
@@ -51,5 +52,6 @@ void RhythmGame_Reset(void);
 /* Dipanggil dari HAL_GPIO_EXTI_Callback di main.c */
 void RhythmGame_BTN1_Tap(void);
 void RhythmGame_BTN2_Press(void);
+uint8_t RhythmGame_GetLevel(void);
 
 #endif /* RHYTHM_GAME_H */

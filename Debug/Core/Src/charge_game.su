@@ -1,6 +1,0 @@
-../Core/Src/charge_game.c:46:13:LED_WriteRaw	16	static
-../Core/Src/charge_game.c:57:6:ChargeGame_Init	8	static
-../Core/Src/charge_game.c:70:16:GetADC_seed	4	static
-../Core/Src/charge_game.c:74:6:ChargeGame_Run	40	static
-../Core/Src/charge_game.c:319:6:ChargeGame_Reset	8	static
-../Core/Src/charge_game.c:324:6:ChargeGame_BTN2_Press	4	static
