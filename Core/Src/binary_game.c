@@ -176,19 +176,29 @@ static void bg_new_round(void)
 
     /* ----------------------------------------------------------------
      * Countdown visual + audio: 3 → 2 → 1
-     *   LED: tampilkan jumlah LED menyala dari kiri (3/2/1 LED)
+     *   LED: menggunakan LED9, LED10, LED11
      *   Buzzer: beep sejumlah angka countdown
      * ---------------------------------------------------------------- */
-    static const uint8_t cnt_patterns[3] = {
-        0xE0,  /* "3": LED1-LED3 nyala  (0b11100000) */
-        0xC0,  /* "2": LED1-LED2 nyala  (0b11000000) */
-        0x80,  /* "1": LED1 saja nyala  (0b10000000) */
-    };
 
     for (int cnt = 3; cnt >= 1; cnt--) {
-        bg_set_leds(cnt_patterns[3 - cnt]);
+        if (cnt == 3) {
+            HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_SET);
+        } else if (cnt == 2) {
+            HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_SET);
+        } else if (cnt == 1) {
+            HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_SET);
+        }
+
         bg_buzz_countdown((uint8_t)cnt);
         HAL_Delay(300);
+
+        if (cnt == 3) {
+            HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_RESET);
+        } else if (cnt == 2) {
+            HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_RESET);
+        } else if (cnt == 1) {
+            HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_RESET);
+        }
     }
 
     /* Siap menerima input: matikan semua LED */

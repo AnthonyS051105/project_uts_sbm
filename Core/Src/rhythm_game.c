@@ -140,9 +140,9 @@ static void rg_play_demo(void)
 
 /**
  * Sinyal siap: hitung mundur "3..2..1"
- *   "3": LED9 ON + beep sangat pendek (50ms)
+ *   "3": LED11 ON + beep sangat pendek (50ms)
  *   "2": LED10 ON + beep sangat pendek (50ms)
- *   "1": LED11 ON + beep panjang (400ms) = GO!
+ *   "1": LED9 ON + beep panjang (400ms) = GO!
  */
 static void rg_ready_signal(void)
 {
@@ -177,7 +177,6 @@ static void rg_ready_signal(void)
     HAL_Delay(100);
     HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_RESET);
 }
-
 /**
  * Hitung deviasi tiap ketukan.
  * tap_err[i] = tap_ts[i] − (input_start + i × beat_ms)
