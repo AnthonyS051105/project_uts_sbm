@@ -1,131 +1,58 @@
-/**
- * @file    rhythm_game.c
- * @brief   Rhythm Tap Game — Fase 1
- *
- * Alur state machine:
- *   IDLE → DEMO → READY → INPUT (non-blocking) → FEEDBACK
- *        → LEVEL_UP → DEMO  (naik level)
- *        → GAME_OVER → IDLE (nyawa habis atau semua level selesai)
- *
- * Integrasi ke main.c:
- *   1. #include "rhythm_game.h"
- *   2. Panggil RhythmGame_Init()         saat MODE_GAME diaktifkan.
- *   3. Panggil RhythmGame_Run()          setiap iterasi while(1) saat MODE_GAME.
- *   4. Panggil RhythmGame_BTN1_Tap()     dari HAL_GPIO_EXTI_Callback (BTN1).
- *   5. Panggil RhythmGame_BTN2_Press()   dari HAL_GPIO_EXTI_Callback (BTN2).
- *
- * CubeMonitor (Step 5):
- *   Override RhythmGame_UART_Transmit() di file lain setelah UART dikonfigurasi.
- *   String yang dikirim setiap akhir pola:
- *     RHYTHM,LEVEL:2,SCORE:340,ERR0:20,ERR1:-45,ERR2:88,AVG:51\r\n
- */
-
 #include "rhythm_game.h"
 #include <string.h>
 #include <stdio.h>
 
 void RhythmGame_UART_Transmit(const char *buf, uint16_t len);
 
-/* ================================================================== *
- *  LED helper                                                          *
- * ================================================================== */
 typedef struct { GPIO_TypeDef *port; uint16_t pin; } _Led_t;
 
 static const _Led_t _leds[8] = {
-    {LED1_GPIO_Port, LED1_Pin},
-    {LED2_GPIO_Port, LED2_Pin},
-    {LED3_GPIO_Port, LED3_Pin},
-    {LED4_GPIO_Port, LED4_Pin},
-    {LED5_GPIO_Port, LED5_Pin},
-    {LED6_GPIO_Port, LED6_Pin},
-    {LED7_GPIO_Port, LED7_Pin},
-    {LED8_GPIO_Port, LED8_Pin},
+    {LED1_GPIO_Port, LED1_Pin}, {LED2_GPIO_Port, LED2_Pin},
+    {LED3_GPIO_Port, LED3_Pin}, {LED4_GPIO_Port, LED4_Pin},
+    {LED5_GPIO_Port, LED5_Pin}, {LED6_GPIO_Port, LED6_Pin},
+    {LED7_GPIO_Port, LED7_Pin}, {LED8_GPIO_Port, LED8_Pin},
 };
 
-static void rg_set_leds(uint8_t pattern)
-{
+static void rg_set_leds(uint8_t pattern) {
     for (int i = 0; i < 8; i++) {
         HAL_GPIO_WritePin(_leds[i].port, _leds[i].pin,
             ((pattern >> i) & 1u) ? GPIO_PIN_SET : GPIO_PIN_RESET);
     }
 }
 
-/* ================================================================== *
- *  Referensi eksternal dari main.c                                    *
- * ================================================================== */
 extern volatile uint32_t adc_dma_val;
 
-/* ================================================================== *
- *  Definisi level (jumlah ketukan per level 1–5)                     *
- * ================================================================== */
 static const uint8_t LEVEL_LEN[5] = {3, 3, 4, 5, 6};
 
-/* ================================================================== *
- *  State game (definisi variabel yang di-extern di header)           *
- * ================================================================== */
 RhythmGame_t rg;
 
-/* Flag B2 dari ISR, dicek di state INPUT */
 static volatile uint8_t rg_btn2_flag = 0;
-
-/**
- * Di-set ke 1 setelah animasi GAME_OVER selesai.
- * Main.c harus cek flag ini dan kembali ke lobby; jangan panggil
- * RhythmGame_Run() lagi sampai RhythmGame_Init() dipanggil ulang.
- */
 volatile uint8_t rg_session_done = 0;
 
-/* ================================================================== *
- *  Buzzer helpers                                                      *
- * ================================================================== */
-
-/** Buzzer ON selama on_ms lalu OFF. */
-static void buzzer_beep(uint32_t on_ms)
-{
+static void buzzer_beep(uint32_t on_ms) {
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
     HAL_Delay(on_ms);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
 }
 
-/**
- * Bunyi BENAR — 2 beep pendek cepat (riang/ascending feel).
- *   Beep 1: 80 ms → jeda 60 ms → Beep 2: 120 ms
- */
-static void buzzer_correct_perfect(void)
-{
+static void buzzer_correct_perfect(void) {
 }
 
-/**
- * Bunyi HAMPIR BENAR (NEAR) — 1 beep sedang.
- */
-static void buzzer_correct_near(void)
-{
+static void buzzer_correct_near(void) {
 }
 
-/**
- * Bunyi SALAH/MISS — 1 beep panjang berat.
- */
-static void buzzer_wrong(void)
-{
+static void buzzer_wrong(void) {
 }
 
-/* ================================================================== *
- *  Fungsi internal                                                     *
- * ================================================================== */
-
-/** ADC 0–4095 → BPM 60–180 → interval ms */
-static uint32_t rg_calc_beat_ms(void)
-{
+static uint32_t rg_calc_beat_ms(void) {
     uint32_t bpm = 60u + (adc_dma_val * 120u / 4095u);
-    if (bpm < 60u)  bpm = 60u;
+    if (bpm < 60u) bpm = 60u;
     if (bpm > 180u) bpm = 180u;
     return 60000u / bpm;
 }
 
-/** Demo pola: semua LED nyala on_ms, padam off_ms, ×pat_len kali. */
-static void rg_play_demo(void)
-{
-    uint32_t on_ms  = (rg.beat_ms > 600u) ? 300u : rg.beat_ms / 2u;
+static void rg_play_demo(void) {
+    uint32_t on_ms = (rg.beat_ms > 600u) ? 300u : rg.beat_ms / 2u;
     uint32_t off_ms = rg.beat_ms - on_ms;
 
     for (uint8_t i = 0; i < rg.pat_len; i++) {
@@ -144,9 +71,7 @@ static void rg_play_demo(void)
  *   "2": LED10 ON + beep sangat pendek (50ms)
  *   "1": LED9 ON + beep panjang (400ms) = GO!
  */
-static void rg_ready_signal(void)
-{
-    /* "3" */
+static void rg_ready_signal(void) {
     HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
     HAL_Delay(50);
@@ -155,7 +80,6 @@ static void rg_ready_signal(void)
     HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_RESET);
     HAL_Delay(500);
 
-    /* "2" */
     HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
     HAL_Delay(50);
@@ -164,30 +88,21 @@ static void rg_ready_signal(void)
     HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_RESET);
     HAL_Delay(500);
 
-    /* PENTING: Buka pintu input SEBELUM bunyi GO!
-       sehingga tap saat GO! (ketika pengguna reaktif) tidak digugurkan */
     rg.state = RG_INPUT;
     rg.input_start = HAL_GetTick();
 
-    /* "1" (GO!) */
     HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-    HAL_Delay(400);     /* buzzer panjang penanda GO */
+    HAL_Delay(400);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
     HAL_Delay(100);
     HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_RESET);
 }
-/**
- * Hitung deviasi tiap ketukan.
- * tap_err[i] = tap_ts[i] − (input_start + i × beat_ms)
- * Beat yang tidak ditekan diberi error = beat_ms (→ MISS).
- */
-static void rg_compute_errors(void)
-{
+
+static void rg_compute_errors(void) {
     for (uint8_t i = 0; i < rg.pat_len; i++) {
         if (i < rg.tap_count) {
-            int32_t expected = (int32_t)(rg.input_start
-                                         + (uint32_t)i * rg.beat_ms);
+            int32_t expected = (int32_t)(rg.input_start + (uint32_t)i * rg.beat_ms);
             rg.tap_err[i] = (int32_t)rg.tap_ts[i] - expected;
         } else {
             rg.tap_err[i] = (int32_t)rg.beat_ms;
@@ -197,24 +112,16 @@ static void rg_compute_errors(void)
 
 static int32_t _abs32(int32_t v) { return v < 0 ? -v : v; }
 
-/** 0=PERFECT (≤50ms)  1=NEAR (51–150ms)  2=MISS (>150ms) */
-static uint8_t rg_classify(int32_t err)
-{
+static uint8_t rg_classify(int32_t err) {
     int32_t a = _abs32(err);
-    if (a <= 50)  return 0;
+    if (a <= 50) return 0;
     if (a <= 150) return 1;
     return 2;
 }
 
-/**
- * Skor ronde:
- *   PERFECT = 100, NEAR = 60−(|err|−50)/3, MISS = 0
- *   Bonus +200 jika semua PERFECT (−50% jika hint dipakai)
- */
-static uint32_t rg_calc_round_score(void)
-{
-    uint32_t total   = 0;
-    uint8_t  all_pef = 1;
+static uint32_t rg_calc_round_score(void) {
+    uint32_t total = 0;
+    uint8_t all_pef = 1;
 
     for (uint8_t i = 0; i < rg.pat_len; i++) {
         uint8_t cls = rg_classify(rg.tap_err[i]);

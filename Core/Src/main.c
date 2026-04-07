@@ -37,16 +37,16 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MY_LAST2         24    /* 2 digit terakhir NIM sendiri  */
-#define PARTNER_LAST2    19    /* 2 digit terakhir NIM partner  */
-#define SHIFT_DELAY_MS   300   /* kecepatan shift Mode 1        */
-#define COUNTER_DELAY_MS 100   /* kecepatan counter Mode 2 (ms) */
-#define ADC_POLL_MS      50    /* polling ADC Mode 3 (ms)       */
-#define DEBOUNCE_MS      200   /* debounce tombol (ms)          */
-#define MODE_GAME        8     /* Mode game — aktif via tekan BTN1+BTN2 bersamaan */
-#define SIMULTANEOUS_MS  150   /* window waktu (ms) untuk deteksi tekan bersamaan */
-#define MODE_LOBBY       10    /* Mode lobby pemilihan game */
-#define SERVO_POT_MS     20    /* interval update servo dari potensiometer (ms)   */
+#define MY_LAST2         24
+#define PARTNER_LAST2    19
+#define SHIFT_DELAY_MS   300
+#define COUNTER_DELAY_MS 100
+#define ADC_POLL_MS      50
+#define DEBOUNCE_MS      200
+#define MODE_GAME        8
+#define SIMULTANEOUS_MS  150
+#define MODE_LOBBY       10
+#define SERVO_POT_MS     20
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,59 +63,46 @@ TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
-/* ---- kontrol mode ---- */
-volatile uint8_t current_mode  = 1;   /* mode aktif: 1, 2, atau 3          */
-volatile uint8_t btn1_flag     = 0;   /* set oleh EXTI BTN1                 */
-volatile uint8_t btn2_flag     = 0;   /* set oleh EXTI BTN2                 */
-uint32_t btn1_last_tick        = 0;
-uint32_t btn2_last_tick        = 0;
+volatile uint8_t current_mode = 1;
+volatile uint8_t btn1_flag = 0;
+volatile uint8_t btn2_flag = 0;
+uint32_t btn1_last_tick = 0;
+uint32_t btn2_last_tick = 0;
 
-/* ---- Variabel Kontrol Servo ---- */
-uint32_t servo_last_tick = 0;         /* Menyimpan waktu update terakhir */
-uint8_t servo_step = 0;               /* Menyimpan state/posisi servo saat ini */
+uint32_t servo_last_tick = 0;
+uint8_t servo_step = 0;
 
-/* ---- Sensor HC-SR04 Variabel ---- */
-uint8_t  hcsr04_state      = 0;       /* 0: Idle, 1: Trig, 2: Wait Rising, 3: Wait Falling */
-uint32_t hcsr04_last_tick  = 0;       /* Waktu polling terakhir */
-uint16_t hcsr04_trig_start = 0;       /* Catatan waktu mulai trigger */
-uint16_t hcsr04_ic_val1    = 0;       /* Capture nilai saat sinyal Echo naik */
-uint16_t hcsr04_ic_val2    = 0;       /* Capture nilai saat sinyal Echo turun */
-uint32_t distance_cm       = 0;       /* Hasil pembacaan jarak dalam cm */
+uint8_t hcsr04_state = 0;
+uint32_t hcsr04_last_tick = 0;
+uint16_t hcsr04_trig_start = 0;
+uint16_t hcsr04_ic_val1 = 0;
+uint16_t hcsr04_ic_val2 = 0;
+uint32_t distance_cm = 0;
 
-/* ---- Mode 1: shift left ---- */
-uint8_t shift_pos = 0;                /* posisi LED yang menyala (0-7)      */
+uint8_t shift_pos = 0;
 
-/* ---- Mode 2: counter (dipantau Cube Monitor - Chart) ---- */
-uint32_t counter_value = 0;           /* nilai counter saat ini             */
-uint8_t  counter_phase = 0;           /* 0 = NIM sendiri, 1 = NIM partner   */
+uint32_t counter_value = 0;
+uint8_t counter_phase = 0;
 
-/* ---- Mode 3: ADC -> LED (dipantau Cube Monitor - Gauge) ---- */
-volatile uint32_t adc_dma_val = 0;    /* buffer DMA hasil ADC               */
-volatile uint32_t led_count   = 0;    /* jumlah LED menyala (0-8)           */
-uint8_t current_led_mask      = 0;    /* snapshot bitmask LED aktif untuk JSON */
+volatile uint32_t adc_dma_val = 0;
+volatile uint32_t led_count = 0;
+uint8_t current_led_mask = 0;
 
-/* ---- Mode 4: dua kereta bertabrakan ---- */
-uint8_t train_step = 0;               /* langkah animasi kereta (0-2)       */
-
-/* ---- Mode 5: binary counter 0-255 ---- */
-uint8_t binary_count = 0;            /* nilai counter biner saat ini (0-255) */
-
-/* ---- Mode 6: LED pattern right shift ---- */
+uint8_t train_step = 0;
+uint8_t binary_count = 0;
 uint8_t mode6_step = 0;
 uint8_t mode6_pattern = 0;
 
-/* ---- Mode Game: deteksi tekan bersamaan ---- */
-volatile uint8_t simultaneous_flag  = 0; /* set jika BTN1+BTN2 ditekan bersamaan */
-volatile uint8_t game_lobby         = 0; /* 1=game1(rhythm) dipilih, 2=game2(binary) dipilih */
-volatile uint8_t game_start_pending = 0; /* BTN2 double-click di lobby → mulai game */
-volatile uint8_t btn2_first_click_pending = 0; /* defer single click btn2 di lobby */
-volatile uint32_t btn2_first_click_tick   = 0; /* timestamp untuk btn2 defer */
+volatile uint8_t simultaneous_flag = 0;
+volatile uint8_t game_lobby = 0;
+volatile uint8_t game_start_pending = 0;
+volatile uint8_t btn2_first_click_pending = 0;
+volatile uint32_t btn2_first_click_tick = 0;
 
-/* ---- Sensor DHT11 ---- */
-DHT_t    dht11;
-float    dht11_temp     = 0.0f;   /* suhu terakhir (°C)  */
-float    dht11_hum      = 0.0f;   /* kelembaban terakhir (%) */
-uint32_t dht11_last_tick = 0;     /* timestamp pembacaan terakhir */
+DHT_t dht11;
+float dht11_temp = 0.0f;
+float dht11_hum = 0.0f;
+uint32_t dht11_last_tick = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -137,7 +124,7 @@ static void MX_TIM2_Init(void);
 
 volatile uint8_t usb_cmd_ready = 0;
 char usb_cmd_buffer[64];
-volatile uint8_t web_force_led_mode = 0; /* 0=none, 1=all OFF, 2=all ON */
+volatile uint8_t web_force_led_mode = 0;
 
 void Process_USB_Command(uint8_t* buf, uint32_t len) {
     static uint32_t idx = 0;
@@ -154,31 +141,19 @@ void Process_USB_Command(uint8_t* buf, uint32_t len) {
     }
 }
 
-/* Override BinaryGame_UART_Transmit → kirim via USB CDC */
-void BinaryGame_UART_Transmit(const char *buf, uint16_t len)
-{
+void BinaryGame_UART_Transmit(const char *buf, uint16_t len) {
     CDC_Transmit_FS((uint8_t*)buf, len);
 }
 
-/* Tabel urutan LED 1-8 (LED8 sebagai LSB/kanan, LED1 sebagai MSB/kiri) */
 typedef struct { GPIO_TypeDef *port; uint16_t pin; } LED_t;
 static const LED_t leds[8] = {
-    {LED8_GPIO_Port, LED8_Pin}, /* bit 0 */
-    {LED7_GPIO_Port, LED7_Pin}, /* bit 1 */
-    {LED6_GPIO_Port, LED6_Pin}, /* bit 2 */
-    {LED5_GPIO_Port, LED5_Pin}, /* bit 3 */
-    {LED4_GPIO_Port, LED4_Pin}, /* bit 4 */
-    {LED3_GPIO_Port, LED3_Pin}, /* bit 5 */
-    {LED2_GPIO_Port, LED2_Pin}, /* bit 6 */
-    {LED1_GPIO_Port, LED1_Pin}, /* bit 7 */
+    {LED8_GPIO_Port, LED8_Pin}, {LED7_GPIO_Port, LED7_Pin},
+    {LED6_GPIO_Port, LED6_Pin}, {LED5_GPIO_Port, LED5_Pin},
+    {LED4_GPIO_Port, LED4_Pin}, {LED3_GPIO_Port, LED3_Pin},
+    {LED2_GPIO_Port, LED2_Pin}, {LED1_GPIO_Port, LED1_Pin},
 };
 
-/**
- * Set LED berdasarkan bit-pattern 8-bit.
- * bit-0 = LED1, bit-7 = LED8.
- */
-static void set_leds(uint8_t pattern)
-{
+static void set_leds(uint8_t pattern) {
     if (web_force_led_mode == 1) pattern = 0x00;
     else if (web_force_led_mode == 2) pattern = 0xFF;
 
@@ -192,7 +167,6 @@ static void set_leds(uint8_t pattern)
 static void all_leds_on(void)  { set_leds(0xFF); }
 static void all_leds_off(void) { set_leds(0x00); }
 
-/* --- Fungsi Refactoring --- */
 static void Process_USB_Command_Loop(void) {
     if (usb_cmd_ready) {
       usb_cmd_ready = 0;
@@ -651,39 +625,30 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  /* Mulai ADC secara continuous via DMA; adc_dma_val diperbarui otomatis */
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&adc_dma_val, 1);
 
-  /* PAKSA INISIALISASI PIN PB8 UNTUK PWM TIM4 (ALTERNATE FUNCTION 2) */
   __HAL_RCC_GPIOB_CLK_ENABLE();
   GPIO_InitStruct.Pin = GPIO_PIN_8;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;       // Mode Alternate Function Push Pull
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;    // Hubungkan pin ini ke TIM4
+  GPIO_InitStruct.Alternate = GPIO_AF2_TIM4;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /* PAKSA INISIALISASI PIN PA6 UNTUK ECHO HC-SR04 (TIM3 CH1 - AF2) */
   __HAL_RCC_GPIOA_CLK_ENABLE();
   GPIO_InitTypeDef GPIO_InitStructEcho = {0};
   GPIO_InitStructEcho.Pin = GPIO_PIN_6;
-  GPIO_InitStructEcho.Mode = GPIO_MODE_AF_PP;    // Mode Alternate Function
+  GPIO_InitStructEcho.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStructEcho.Pull = GPIO_NOPULL;
   GPIO_InitStructEcho.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStructEcho.Alternate = GPIO_AF2_TIM3; // Hubungkan ke TIM3
+  GPIO_InitStructEcho.Alternate = GPIO_AF2_TIM3;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStructEcho);
 
-  /* Mulai PWM untuk Servo di TIM4 Channel 3 */
   HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
 
-  /* Mulai timer 3 untuk HC-SR04 (1 MHz = 1 tick per 1 mikrodetik) */
   HAL_TIM_Base_Start(&htim3);
-  HAL_TIM_IC_Start(&htim3, TIM_CHANNEL_1); // Polling mode untuk baca Echo
+  HAL_TIM_IC_Start(&htim3, TIM_CHANNEL_1);
 
-  /* ---- Init DHT11 ----
-   * Pin  : PB0 (DHT11_Pin / DHT11_GPIO_Port, sudah terdefinisi di main.h)
-   * Timer: TIM2 dikonfigurasi library ke 1 MHz (bus 16 MHz, prescaler = 15)
-   * Library menunggu hingga HAL_GetTick() >= 2000 ms sebagai warm-up DHT. */
   HAL_TIM_Base_Start(&htim2);
   DHT_init(&dht11, DHT_Type_DHT11, &htim2, 84, DHT11_GPIO_Port, DHT11_Pin);
   /* USER CODE END 2 */
