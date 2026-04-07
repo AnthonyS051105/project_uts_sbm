@@ -192,6 +192,418 @@ static void set_leds(uint8_t pattern)
 static void all_leds_on(void)  { set_leds(0xFF); }
 static void all_leds_off(void) { set_leds(0x00); }
 
+/* --- Fungsi Refactoring --- */
+static void Process_USB_Command_Loop(void) {
+    if (usb_cmd_ready) {
+      usb_cmd_ready = 0;
+      if (strncmp(usb_cmd_buffer, "MODE:", 5) == 0) {
+        uint8_t m = atoi(&usb_cmd_buffer[5]);
+        if (m >= 1 && m <= 9) {
+          current_mode = m;
+          shift_pos     = 0;
+          counter_value = 0;
+          counter_phase = 0;
+          train_step    = 0;
+          binary_count  = 0;
+          mode6_step    = 0;
+          mode6_pattern = 0;
+          web_force_led_mode = 0; 
+          
+          if (m == 8) {
+            game_lobby = 1;
+            game_start_pending = 1; 
+          } else if (m == 9) {
+            game_lobby = 2;
+            game_start_pending = 1; 
+          } else {
+            game_lobby = 0;
+            game_start_pending = 0;
+          }
+          all_leds_off(); 
+        }
+      } else if (strcmp(usb_cmd_buffer, "ISR") == 0) {
+        web_force_led_mode = 0; 
+        btn2_flag = 1;
+      } else if (strcmp(usb_cmd_buffer, "LED:FF") == 0) {
+        web_force_led_mode = 2; 
+        all_leds_on();
+      } else if (strcmp(usb_cmd_buffer, "LED:00") == 0) {
+        web_force_led_mode = 1; 
+        all_leds_off();
+      } else if (strcmp(usb_cmd_buffer, "RESET") == 0) {
+        RhythmGame_Reset();
+        BinaryGame_Reset();
+      }
+    }
+}
+
+static void Process_Servo_Control(uint32_t current_tick) {
+    if (current_mode < 7) {
+      if ((current_tick - servo_last_tick) >= 1000) {
+        servo_last_tick = current_tick;
+        switch (servo_step) {
+          case 0: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 500);  servo_step = 1; break;
+          case 1: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 1500); servo_step = 2; break;
+          case 2: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 2500); servo_step = 0; break;
+        }
+      }
+    }
+}
+
+static void Process_HCSR04(uint32_t current_tick) {
+    switch (hcsr04_state) {
+      case 0: 
+        if ((current_tick - hcsr04_last_tick) >= 150) {
+          hcsr04_last_tick = current_tick;
+          HAL_GPIO_WritePin(GPIOA, TRIG_PIN_Pin, GPIO_PIN_SET);
+          hcsr04_trig_start = __HAL_TIM_GET_COUNTER(&htim3);
+          hcsr04_state = 1;
+        }
+        break;
+
+      case 1: 
+        if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_trig_start) >= 10) {
+          HAL_GPIO_WritePin(GPIOA, TRIG_PIN_Pin, GPIO_PIN_RESET);
+          __HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_CC1);
+          __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_RISING);
+          hcsr04_state = 2;
+        }
+        break;
+
+      case 2: 
+        if (__HAL_TIM_GET_FLAG(&htim3, TIM_FLAG_CC1)) {
+          hcsr04_ic_val1 = HAL_TIM_ReadCapturedValue(&htim3, TIM_CHANNEL_1);
+          __HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_CC1);
+          __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_FALLING);
+          hcsr04_state = 3;
+        }
+        else if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_trig_start) > 50000) {
+          hcsr04_state = 0;
+        }
+        break;
+
+      case 3: 
+        if (__HAL_TIM_GET_FLAG(&htim3, TIM_FLAG_CC1)) {
+          hcsr04_ic_val2 = HAL_TIM_ReadCapturedValue(&htim3, TIM_CHANNEL_1);
+          
+          uint32_t diff = (hcsr04_ic_val2 > hcsr04_ic_val1) ? 
+                          (hcsr04_ic_val2 - hcsr04_ic_val1) : 
+                          (0xFFFF - hcsr04_ic_val1 + hcsr04_ic_val2);
+          
+          uint32_t raw_dist = diff / 58;
+          if (raw_dist > 400) raw_dist = 400;
+
+          static uint32_t f_dist = 0;
+          if (f_dist == 0) f_dist = raw_dist;
+          
+          f_dist = ((f_dist * 9) + raw_dist) / 10;
+          
+          distance_cm = f_dist;
+          hcsr04_state = 0;
+        }
+        else if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_ic_val1) > 30000) {
+          hcsr04_state = 0;
+        }
+        break;
+    }
+}
+
+static void Process_Buttons(void) {
+    if (simultaneous_flag) {
+      simultaneous_flag = 0;
+      if (current_mode >= 8) {
+        current_mode       = 1;
+        game_lobby         = 0;
+        game_start_pending = 0;
+        shift_pos     = 0;
+        counter_value = 0;
+        counter_phase = 0;
+        train_step    = 0;
+        binary_count  = 0;
+        mode6_step    = 0;
+        mode6_pattern = 0;
+        web_force_led_mode = 0;
+        RhythmGame_Reset();
+        BinaryGame_Reset();
+        all_leds_off();
+      } else {
+        current_mode = MODE_LOBBY;
+        game_lobby   = 0;
+        btn2_first_click_pending = 0;
+        web_force_led_mode = 0;
+        all_leds_off();
+      }
+    }
+
+    if (btn2_flag && current_mode < 8) {
+      btn2_flag = 0;
+      uint8_t prev_force = web_force_led_mode;
+      web_force_led_mode = 0;
+      all_leds_on();
+      HAL_Delay(5000);
+      all_leds_off();
+      web_force_led_mode = prev_force; 
+    }
+
+    if (btn1_flag && current_mode < 8) {
+      btn1_flag    = 0;
+      current_mode = (current_mode % 7) + 1;
+      shift_pos     = 0;
+      counter_value = 0;
+      counter_phase = 0;
+      train_step    = 0;
+      binary_count  = 0;
+      mode6_step    = 0;
+      mode6_pattern = 0;
+      web_force_led_mode = 0;
+      all_leds_off();
+    }
+}
+
+static void Process_Lobby_Timeout(uint32_t current_tick) {
+    if (current_mode == MODE_LOBBY && btn2_first_click_pending) {
+      if (current_tick - btn2_first_click_tick > 400) {
+        btn2_first_click_pending = 0;
+        game_lobby = 2;
+        all_leds_off();
+        HAL_GPIO_WritePin(LED7_GPIO_Port, LED7_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
+      }
+    }
+}
+
+static void Process_Game_Start(void) {
+    if (game_start_pending) {
+      game_start_pending = 0;
+      uint8_t sel = game_lobby;
+      current_mode = (sel == 1) ? 8 : 9;
+      game_lobby = 0;
+      all_leds_off();
+      
+      {
+        char buffer[230];
+        uint32_t c_score = (sel == 2) ? BinaryGame_GetScore() : rg.score;
+        uint8_t c_lives  = (sel == 2) ? 0 : rg.lives;
+
+        uint16_t len = snprintf(buffer, sizeof(buffer),
+          "{\"mode\":%d,\"gameLobby\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d,\"binaryTarget\":%d,\"binaryRound\":%d,\"rhythmLevel\":%d}\r\n",
+          current_mode, game_lobby, adc_dma_val, counter_value, current_led_mask, distance_cm,
+          (int)dht11_temp, (int)dht11_hum, c_score, (int)c_lives, (int)BinaryGame_GetTarget(), (int)BinaryGame_GetRound(), (int)RhythmGame_GetLevel());
+        CDC_Transmit_FS((uint8_t*)buffer, len);
+      }
+
+      HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+      HAL_Delay(300);
+      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+      HAL_Delay(700);
+      HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_RESET);
+
+      HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+      HAL_Delay(300);
+      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+      HAL_Delay(700);
+      HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_RESET);
+
+      HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+      HAL_Delay(300);
+      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+      HAL_Delay(700);
+      HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_RESET);
+
+      all_leds_off();
+
+      if (sel == 1) {
+        RhythmGame_Init();
+      } else {
+        BinaryGame_Init();
+      }
+    }
+}
+
+static void Process_Modes(uint32_t current_tick) {
+    static uint32_t mode_last_tick = 0;
+    
+    switch (current_mode)
+    {
+      case 1:
+      {
+        if (current_tick - mode_last_tick >= SHIFT_DELAY_MS) {
+          mode_last_tick = current_tick;
+          if (shift_pos < 8) set_leds((uint8_t)(1u << shift_pos));
+          else set_leds(0x00);
+          shift_pos = (shift_pos + 1) % 9;
+        }
+        break;
+      }
+
+      case 2:
+      {
+        if (current_tick - mode_last_tick >= COUNTER_DELAY_MS) {
+          mode_last_tick = current_tick;
+          all_leds_off();
+          uint32_t target = (counter_phase == 0) ? MY_LAST2 : PARTNER_LAST2;
+          counter_value++;
+          if (counter_value > target) {
+            counter_value = 0;
+            counter_phase ^= 1u;
+          }
+        }
+        break;
+      }
+
+      case 3:
+      {
+        if (current_tick - mode_last_tick >= ADC_POLL_MS) {
+          mode_last_tick = current_tick;
+          static uint32_t filtered_adc = 0;
+          filtered_adc = (filtered_adc * 7 + adc_dma_val) / 8;
+          uint32_t logical_adc = 4095 - filtered_adc;
+          if (logical_adc <= 100) led_count = 0;
+          else if (logical_adc >= 4000) led_count = 8;
+          else {
+            led_count = (logical_adc * 8u) / 4095u;
+            if (led_count == 0) led_count = 1; 
+          }
+          uint8_t pattern = (led_count == 0) ? 0x00 : (uint8_t)(0xFF00u >> led_count);
+          set_leds(pattern);
+        }
+        break;
+      }
+
+      case 4:
+      {
+        uint32_t adc = adc_dma_val;
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
+        if (current_tick - mode_last_tick >= delay_ms) {
+          mode_last_tick = current_tick;
+          static const uint8_t pat[14] = {
+              0x00, 0x81, 0xC3, 0xE7, 0x7E, 0x3C, 0x18, 0x00,
+              0x18, 0x3C, 0x7E, 0xE7, 0xC3, 0x81
+          };
+          set_leds(pat[train_step]);
+          train_step = (train_step + 1u) % 14u;
+        }
+        break;
+      }
+
+      case 5:
+      {
+        uint32_t adc = adc_dma_val;
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
+        if (current_tick - mode_last_tick >= delay_ms) {
+          mode_last_tick = current_tick;
+          set_leds(binary_count);
+          binary_count++;
+        }
+        break;
+      }
+
+      case 6:
+      {
+        uint32_t adc = adc_dma_val;
+        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
+        if (current_tick - mode_last_tick >= delay_ms) {
+          mode_last_tick = current_tick;
+          if (mode6_step == 0) mode6_pattern = (mode6_pattern >> 1) | 0x80u;
+          else mode6_pattern = (mode6_pattern >> 1);
+          set_leds(mode6_pattern);
+          mode6_step = (mode6_step + 1) % 3;
+        }
+        break;
+      }
+
+      case 7:
+      {
+        if (current_tick - mode_last_tick >= SERVO_POT_MS) {
+          mode_last_tick = current_tick;
+
+          static uint32_t servo_adc_filtered = 0;
+          servo_adc_filtered = (servo_adc_filtered * 7 + adc_dma_val) / 8;
+
+          uint32_t pulse = 500u + (servo_adc_filtered * 2000u / 4095u);
+          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, pulse);
+
+          uint8_t led_bar = (uint8_t)(servo_adc_filtered * 8u / 4095u);
+          uint8_t pattern = (led_bar == 0) ? 0x00u : (uint8_t)(0xFF00u >> led_bar);
+          set_leds(pattern);
+        }
+        break;
+      }
+
+      case 8:
+        if (rg_session_done) {
+          rg_session_done = 0;
+          current_mode = MODE_LOBBY;
+          game_lobby   = 1;
+          all_leds_off();
+          HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
+        } else {
+          RhythmGame_Run();
+        }
+        break;
+
+      case 9:
+        if (bg_session_done) {
+          bg_session_done = 0;
+          current_mode = MODE_LOBBY;
+          game_lobby   = 2;
+          all_leds_off();
+          HAL_GPIO_WritePin(LED7_GPIO_Port, LED7_Pin, GPIO_PIN_SET);
+          HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
+        } else {
+          BinaryGame_Run();
+        }
+        break;
+
+      case 10:
+        break;
+
+      default:
+        current_mode = 1;
+        break;
+    }
+}
+
+static void Process_DHT11(uint32_t current_tick) {
+    if ((current_tick - dht11_last_tick) >= 2000) {
+      dht11_last_tick = current_tick;
+      DHT_readData(&dht11, &dht11_temp, &dht11_hum);
+    }
+}
+
+static void Process_USB_CDC_Transmit(uint32_t current_tick) {
+    static uint32_t usb_last_tick = 0;
+    if (current_tick - usb_last_tick >= 200) {
+      usb_last_tick = current_tick;
+
+      char buffer[220];
+
+      uint32_t current_score = (current_mode == 9 || game_lobby == 2) ? BinaryGame_GetScore() : rg.score;
+      uint8_t current_lives  = (current_mode == 9 || game_lobby == 2) ? 0 : rg.lives;
+
+      uint16_t len = snprintf(buffer, sizeof(buffer),
+        "{\"mode\":%d,\"gameLobby\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d,\"binaryTarget\":%d,\"binaryRound\":%d,\"rhythmLevel\":%d}\r\n",
+        current_mode,
+        game_lobby,
+        adc_dma_val,
+        counter_value,
+        current_led_mask,
+        distance_cm,
+        (int)dht11_temp,
+        (int)dht11_hum,
+        current_score,
+        (int)current_lives,
+        (int)BinaryGame_GetTarget(),
+        (int)BinaryGame_GetRound(),
+        (int)RhythmGame_GetLevel());
+
+      CDC_Transmit_FS((uint8_t*)buffer, len);
+    }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -286,539 +698,15 @@ int main(void)
 
     uint32_t current_tick = HAL_GetTick();
 
-    /* ============================================================
-     * Proses USB Command dari Website/Python
-     * ============================================================ */
-    if (usb_cmd_ready) {
-      usb_cmd_ready = 0;
-      if (strncmp(usb_cmd_buffer, "MODE:", 5) == 0) {
-        uint8_t m = atoi(&usb_cmd_buffer[5]);
-        if (m >= 1 && m <= 9) {
-          current_mode = m;
-          shift_pos     = 0;
-          counter_value = 0;
-          counter_phase = 0;
-          train_step    = 0;
-          binary_count  = 0;
-          mode6_step    = 0;
-          mode6_pattern = 0;
-          web_force_led_mode = 0; /* Kembalikan kontrol LED ke per-mode */
-          
-          if (m == 8) {
-            game_lobby = 1;
-            game_start_pending = 1; // langsung start rhythm game
-          } else if (m == 9) {
-            game_lobby = 2;
-            game_start_pending = 1; // langsung start binary game
-          } else {
-            game_lobby = 0;
-            game_start_pending = 0;
-          }
-          all_leds_off(); // panggil ini agar mereset current_led_mask sesuai override (0x00)
-        }
-      } else if (strcmp(usb_cmd_buffer, "ISR") == 0) {
-        web_force_led_mode = 0; // Kembalikan kontrol LED statis saat ISR!
-        btn2_flag = 1;
-      } else if (strcmp(usb_cmd_buffer, "LED:FF") == 0) {
-        web_force_led_mode = 2; // Paksa semua LED NYALA
-        all_leds_on();
-      } else if (strcmp(usb_cmd_buffer, "LED:00") == 0) {
-        web_force_led_mode = 1; // Paksa semua LED MATI
-        all_leds_off();
-      } else if (strcmp(usb_cmd_buffer, "RESET") == 0) {
-        RhythmGame_Reset();
-        BinaryGame_Reset();
-      }
-    }
-
-    /* ============================================================
-     * Kontrol Servo SG90 otomatis (0° -> 90° -> 180°) — Mode 1–6
-     * Non-blocking, jeda 1 detik antar posisi.
-     * ============================================================ */
-    if (current_mode < 7) {
-      if ((current_tick - servo_last_tick) >= 1000) {
-        servo_last_tick = current_tick;
-        switch (servo_step) {
-          case 0: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 500);  servo_step = 1; break;
-          case 1: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 1500); servo_step = 2; break;
-          case 2: __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, 2500); servo_step = 0; break;
-        }
-      }
-    }
-
-    /* USER CODE BEGIN 3 */
-
-    /* ============================================================
-     * Sensor HC-SR04 (Non-Blocking Polling dengan State Machine)
-     * ============================================================ */
-    switch (hcsr04_state) {
-      case 0: /* IDLE: Tunggu 100ms untuk pembacaan berikutnya */
-        if ((current_tick - hcsr04_last_tick) >= 150) {
-          hcsr04_last_tick = current_tick;
-
-          /* Berikan sinyal HIGH ke pin Trigger */
-          HAL_GPIO_WritePin(GPIOA, TRIG_PIN_Pin, GPIO_PIN_SET);
-          hcsr04_trig_start = __HAL_TIM_GET_COUNTER(&htim3);
-          hcsr04_state = 1;
-        }
-        break;
-
-      case 1: /* TRIGGERING: Tahan Trigger tetap HIGH minimal 10us */
-        if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_trig_start) >= 10) {
-          /* Turunkan sinyal Trigger menjadi LOW */
-          HAL_GPIO_WritePin(GPIOA, TRIG_PIN_Pin, GPIO_PIN_RESET);
-
-          /* Bersihkan flag Capture dan atur agar sensitif terhadap sinyal NAIK (Rising Edge) */
-          __HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_CC1);
-          __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_RISING);
-          hcsr04_state = 2;
-        }
-        break;
-
-      case 2: /* WAIT RISING: Tunggu sinyal Echo menjadi HIGH dari sensor */
-        if (__HAL_TIM_GET_FLAG(&htim3, TIM_FLAG_CC1)) {
-          /* Simpan waktu saat sinyal mulai HIGH */
-          hcsr04_ic_val1 = HAL_TIM_ReadCapturedValue(&htim3, TIM_CHANNEL_1);
-
-          /* Ubah sensitivitas untuk membaca sinyal TURUN (Falling Edge) */
-          __HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_CC1);
-          __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_FALLING);
-          hcsr04_state = 3;
-        }
-        /* Timeout Protection (~50ms) jika terjadi error (misal kabel lepas) */
-        else if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_trig_start) > 50000) {
-          hcsr04_state = 0;
-        }
-        break;
-
-      case 3: /* WAIT FALLING: Tunggu sinyal Echo kembali LOW */
-        if (__HAL_TIM_GET_FLAG(&htim3, TIM_FLAG_CC1)) {
-          hcsr04_ic_val2 = HAL_TIM_ReadCapturedValue(&htim3, TIM_CHANNEL_1);
-          
-          uint32_t diff = (hcsr04_ic_val2 > hcsr04_ic_val1) ? 
-                          (hcsr04_ic_val2 - hcsr04_ic_val1) : 
-                          (0xFFFF - hcsr04_ic_val1 + hcsr04_ic_val2);
-          
-          uint32_t raw_dist = diff / 58;
-          if (raw_dist > 400) raw_dist = 400;
-
-          /* Filter yang lebih agresif untuk menahan drift */
-          static uint32_t f_dist = 0;
-          if (f_dist == 0) f_dist = raw_dist;
-          
-          // Menggunakan pembagian bit shift (>>2) atau (>>3) lebih cepat dari pembagian biasa
-          // Rumus: 90% lama + 10% baru
-          f_dist = ((f_dist * 9) + raw_dist) / 10;
-          
-          distance_cm = f_dist;
-          hcsr04_state = 0;
-        }
-        /* Timeout Protection jika sensor out of range */
-        else if ((uint16_t)(__HAL_TIM_GET_COUNTER(&htim3) - hcsr04_ic_val1) > 30000) {
-          hcsr04_state = 0;
-        }
-        break;
-    }
-
-    /* ============================================================
-     * BTN1 + BTN2 bersamaan: toggle Mode Game
-     * ============================================================ */
-    if (simultaneous_flag) {
-      simultaneous_flag = 0;
-      if (current_mode >= 8) {
-        /* Keluar dari mode game/lobby -> kembali ke Mode 1 */
-        current_mode       = 1;
-        game_lobby         = 0;
-        game_start_pending = 0;
-        shift_pos     = 0;
-        counter_value = 0;
-        counter_phase = 0;
-        train_step    = 0;
-        binary_count  = 0;
-        mode6_step    = 0;
-        mode6_pattern = 0;
-        web_force_led_mode = 0;
-        RhythmGame_Reset();
-        BinaryGame_Reset();
-        all_leds_off();
-      } else {
-        /* Masuk ke lobby: belum ada game yang dipilih, semua LED padam */
-        current_mode = MODE_LOBBY;
-        game_lobby   = 0;
-        btn2_first_click_pending = 0;
-        web_force_led_mode = 0;
-        all_leds_off();
-      }
-    }
-
-    /* ============================================================
-     * BTN2 (INTERRUPT): semua LED nyala 5 detik, lalu kembali ke
-     * mode yang sama sebelum interrupt secara otomatis.
-     * Hanya aktif di mode 1–6, TIDAK di mode game.
-     * ============================================================ */
-    if (btn2_flag && current_mode < 8) {
-      btn2_flag = 0;
-      uint8_t prev_force = web_force_led_mode;
-      web_force_led_mode = 0;
-      all_leds_on();
-      HAL_Delay(5000);
-      all_leds_off();
-      web_force_led_mode = prev_force; /* Kembalikan ke mode statis jika sebelumnya statis */
-    }
-
-    /* ============================================================
-     * BTN1: ganti mode  1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 1 -> ...
-     * Hanya aktif di mode 1–6, TIDAK di mode game.
-     * ============================================================ */
-    if (btn1_flag && current_mode < 8) {
-      btn1_flag    = 0;
-      current_mode = (current_mode % 7) + 1;
-      shift_pos     = 0;
-      counter_value = 0;
-      counter_phase = 0;
-      train_step    = 0;
-      binary_count  = 0;
-      mode6_step    = 0;
-      mode6_pattern = 0;
-      web_force_led_mode = 0;
-      all_leds_off();
-    }
-
-    /* ============================================================
-     * Timeout pendeteksi tekan BTN2 sekali untuk memilih Binary Game
-     * ============================================================ */
-    if (current_mode == MODE_LOBBY && btn2_first_click_pending) {
-      if (HAL_GetTick() - btn2_first_click_tick > 400) {
-        btn2_first_click_pending = 0;
-        game_lobby = 2;
-        all_leds_off();
-        HAL_GPIO_WritePin(LED7_GPIO_Port, LED7_Pin, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
-      }
-    }
-
-    /* ============================================================
-     * Mulai game: countdown LED9→LED10→LED11 ("3,2,1") + buzzer,
-     * lalu jalankan game yang dipilih di lobby.
-     * ============================================================ */
-    if (game_start_pending) {
-      game_start_pending = 0;
-      uint8_t sel = game_lobby;
-      /* Set mode sebelum countdown agar UI React mulai render & hitung mundur bareng MCU */
-      current_mode = (sel == 1) ? 8 : 9;
-      game_lobby = 0;
-      all_leds_off();
-      
-      // Kirim satu frame JSON langsung ke USB / serial (force) agar UI bisa mulai countdown 3..2..1
-      {
-        char buffer[230];
-        uint32_t c_score = (sel == 2) ? BinaryGame_GetScore() : rg.score;
-        uint8_t c_lives  = (sel == 2) ? 0 : rg.lives;
-
-        uint16_t len = snprintf(buffer, sizeof(buffer),
-          "{\"mode\":%d,\"gameLobby\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d,\"binaryTarget\":%d,\"binaryRound\":%d,\"rhythmLevel\":%d}\r\n",
-          current_mode, game_lobby, adc_dma_val, counter_value, current_led_mask, distance_cm,
-          (int)dht11_temp, (int)dht11_hum, c_score, (int)c_lives, (int)BinaryGame_GetTarget(), (int)BinaryGame_GetRound(), (int)RhythmGame_GetLevel());
-        CDC_Transmit_FS((uint8_t*)buffer, len);
-      }
-
-      /* Countdown "3" — LED11 menyala, satu beep */
-      HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_SET);
-      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-      HAL_Delay(300);
-      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-      HAL_Delay(700);
-      HAL_GPIO_WritePin(LED11_GPIO_Port, LED11_Pin, GPIO_PIN_RESET);
-
-      /* Countdown "2" — LED10 menyala, satu beep */
-      HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_SET);
-      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-      HAL_Delay(300);
-      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-      HAL_Delay(700);
-      HAL_GPIO_WritePin(LED10_GPIO_Port, LED10_Pin, GPIO_PIN_RESET);
-
-      /* Countdown "1" — LED9 menyala, satu beep */
-      HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_SET);
-      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-      HAL_Delay(300);
-      HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-      HAL_Delay(700);
-      HAL_GPIO_WritePin(LED9_GPIO_Port, LED9_Pin, GPIO_PIN_RESET);
-
-      all_leds_off();
-
-      /* Inisialisasi game yang dipilih */
-      if (sel == 1) {
-        RhythmGame_Init();
-      } else {
-        BinaryGame_Init();
-      }
-    }
-
-    /* ============================================================
-     * Eksekusi mode aktif (NON-BLOCKING)
-     * ============================================================ */
-    static uint32_t mode_last_tick = 0;
-    
-    switch (current_mode)
-    {
-      /* ----------------------------------------------------------
-       * MODE 1: Shift Left
-       * Satu LED menyala bergeser dari LED1 -> LED2 -> ... -> LED8
-       * lalu kembali ke LED1.
-       * ---------------------------------------------------------- */
-      case 1:
-      {
-        if (current_tick - mode_last_tick >= SHIFT_DELAY_MS) {
-          mode_last_tick = current_tick;
-          if (shift_pos < 8) set_leds((uint8_t)(1u << shift_pos));
-          else set_leds(0x00);
-          shift_pos = (shift_pos + 1) % 9;
-        }
-        break;
-      }
-
-      /* ----------------------------------------------------------
-       * MODE 2: Counter + Cube Monitor (Chart)
-       * LED semua padam.
-       * counter_value: 0 -> MY_LAST2 (24), reset ke 0,
-       *                0 -> PARTNER_LAST2 (19), reset ke 0, dst.
-       * Pantau variabel "counter_value" di Cube Monitor (Chart).
-       * ---------------------------------------------------------- */
-      case 2:
-      {
-        if (current_tick - mode_last_tick >= COUNTER_DELAY_MS) {
-          mode_last_tick = current_tick;
-          all_leds_off();
-          uint32_t target = (counter_phase == 0) ? MY_LAST2 : PARTNER_LAST2;
-          counter_value++;
-          if (counter_value > target) {
-            counter_value = 0;
-            counter_phase ^= 1u;
-          }
-        }
-        break;
-      }
-
-      /* ----------------------------------------------------------
-       * MODE 3: Potensiometer -> LED + Cube Monitor (Gauge)
-       * ADC 12-bit (0-4095):
-       *   adc = 0       -> 0 LED menyala
-       *   adc >= 895    -> 8 LED menyala
-       *   di antaranya  -> proporsional (LED1..LEDn menyala)
-       * Pantau variabel "led_count" di Cube Monitor (Gauge, 0-8).
-       * ---------------------------------------------------------- */
-      case 3:
-      {
-        if (current_tick - mode_last_tick >= ADC_POLL_MS) {
-          mode_last_tick = current_tick;
-          static uint32_t filtered_adc = 0;
-          filtered_adc = (filtered_adc * 7 + adc_dma_val) / 8;
-          uint32_t logical_adc = 4095 - filtered_adc;
-          if (logical_adc <= 100) led_count = 0;
-          else if (logical_adc >= 4000) led_count = 8;
-          else {
-            led_count = (logical_adc * 8u) / 4095u;
-            if (led_count == 0) led_count = 1; 
-          }
-          uint8_t pattern = (led_count == 0) ? 0x00 : (uint8_t)(0xFF00u >> led_count);
-          set_leds(pattern);
-        }
-        break;
-      }
-
-      /* ----------------------------------------------------------
-       * MODE 4: Dua kereta bertabrakan (panjang 3 LED masing-masing)
-       * Kereta kiri  : mulai LED1..LED3, bergerak ke kanan.
-       * Kereta kanan : mulai LED6..LED8, bergerak ke kiri.
-       * Saat step-2 keduanya bertemu di tengah (tabrakan) -> flash
-       * semua LED, lalu animasi diulang dari awal.
-       * Potensiometer: ADC makin besar -> delay makin kecil -> makin cepat.
-       *   ADC = 0    -> delay 500 ms (lambat)
-       *   ADC = 4095 -> delay  50 ms (cepat)
-       * ---------------------------------------------------------- */
-      case 4:
-      {
-        uint32_t adc = adc_dma_val;
-        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
-        if (current_tick - mode_last_tick >= delay_ms) {
-          mode_last_tick = current_tick;
-          static const uint8_t pat[14] = {
-              0x00, 0x81, 0xC3, 0xE7, 0x7E, 0x3C, 0x18, 0x00,
-              0x18, 0x3C, 0x7E, 0xE7, 0xC3, 0x81
-          };
-          set_leds(pat[train_step]);
-          train_step = (train_step + 1u) % 14u;
-        }
-        break;
-      }
-
-      /* ----------------------------------------------------------
-       * MODE 5: Binary Counter 0–255 + Potensiometer -> kecepatan
-       * LED menampilkan nilai biner: bit-0 = LED1, bit-7 = LED8.
-       *   0   (0b00000000) -> semua LED mati
-       *   255 (0b11111111) -> semua LED nyala
-       * Setelah 255, counter kembali ke 0.
-       * Potensiometer: ADC makin besar -> delay makin kecil -> makin cepat.
-       *   ADC = 0    -> delay 500 ms (lambat)
-       *   ADC = 4095 -> delay  50 ms (cepat)
-       * ---------------------------------------------------------- */
-      case 5:
-      {
-        uint32_t adc = adc_dma_val;
-        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
-        if (current_tick - mode_last_tick >= delay_ms) {
-          mode_last_tick = current_tick;
-          set_leds(binary_count);
-          binary_count++;
-        }
-        break;
-      }
-
-      /* ----------------------------------------------------------
-       * MODE 6: LED Menyala Selang 2, Bergeser ke Kanan
-       * Visual:
-       * ●○○○○○○○ -> ○●○○○○○○ -> ○○●○○○○○ -> ●○○●○○○○ ...
-       * (di mana bit-0 = LED1, bit-7 = LED8)
-       * ---------------------------------------------------------- */
-      case 6:
-      {
-        uint32_t adc = adc_dma_val;
-        uint32_t delay_ms = 50u + (adc * 450u / 4095u);
-        if (current_tick - mode_last_tick >= delay_ms) {
-          mode_last_tick = current_tick;
-          if (mode6_step == 0) mode6_pattern = (mode6_pattern >> 1) | 0x80u;
-          else mode6_pattern = (mode6_pattern >> 1);
-          set_leds(mode6_pattern);
-          mode6_step = (mode6_step + 1) % 3;
-        }
-        break;
-      }
-
-      /* ----------------------------------------------------------
-       * MODE 7: Kontrol Servo via Potensiometer
-       * ADC 12-bit (0–4095) dipetakan ke pulsa PWM servo:
-       *   ADC = 0    -> 500  µs (~0°)
-       *   ADC = 2047 -> 1500 µs (~90°)
-       *   ADC = 4095 -> 2500 µs (~180°)
-       * LED bar menampilkan posisi servo (0–8 LED menyala).
-       * ---------------------------------------------------------- */
-      case 7:
-      {
-        if (current_tick - mode_last_tick >= SERVO_POT_MS) {
-          mode_last_tick = current_tick;
-
-          /* Filter IIR ringan untuk meredam noise ADC */
-          static uint32_t servo_adc_filtered = 0;
-          servo_adc_filtered = (servo_adc_filtered * 7 + adc_dma_val) / 8;
-
-          /* Peta ADC 0–4095 ke pulse width 500–2500 µs */
-          uint32_t pulse = 500u + (servo_adc_filtered * 2000u / 4095u);
-          __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, pulse);
-
-          /* LED bar: 0 LED (ADC=0) hingga 8 LED (ADC=4095) */
-          uint8_t led_bar = (uint8_t)(servo_adc_filtered * 8u / 4095u);
-          uint8_t pattern = (led_bar == 0) ? 0x00u : (uint8_t)(0xFF00u >> led_bar);
-          set_leds(pattern);
-        }
-        break;
-      }
-
-      /* ----------------------------------------------------------
-       * MODE 8: Rhythm Tap Game
-       * Keluar manual : BTN1+BTN2 bersamaan → Mode 1.
-       * Keluar otomatis: setelah GAME_OVER → kembali ke lobby (Mode 10).
-       * ---------------------------------------------------------- */
-      case 8:
-        if (rg_session_done) {
-          rg_session_done = 0;
-          /* Kembali ke lobby dengan pilihan rhythm (LED8 menyala) */
-          current_mode = MODE_LOBBY;
-          game_lobby   = 1;
-          all_leds_off();
-          HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
-        } else {
-          RhythmGame_Run();
-        }
-        break;
-
-      /* ----------------------------------------------------------
-       * MODE 9: Game Konversi Biner
-       * Keluar manual : BTN1+BTN2 bersamaan → Mode 1.
-       * Keluar otomatis: setelah BG_MAX_ROUNDS soal → kembali ke lobby (Mode 10).
-       * ---------------------------------------------------------- */
-      case 9:
-        if (bg_session_done) {
-          bg_session_done = 0;
-          /* Kembali ke lobby dengan pilihan binary (LED7+LED8 menyala) */
-          current_mode = MODE_LOBBY;
-          game_lobby   = 2;
-          all_leds_off();
-          HAL_GPIO_WritePin(LED7_GPIO_Port, LED7_Pin, GPIO_PIN_SET);
-          HAL_GPIO_WritePin(LED8_GPIO_Port, LED8_Pin, GPIO_PIN_SET);
-        } else {
-          BinaryGame_Run();
-        }
-        break;
-
-      /* ----------------------------------------------------------
-       * MODE 10: Lobby pemilihan game
-       * LED8 menyala (game 1) atau LED7+LED8 menyala (game 2).
-       * LED sudah diatur saat masuk/berganti mode — tidak ada aksi
-       * di loop, cukup tunggu input user.
-       * ---------------------------------------------------------- */
-      case 10:
-        break;
-
-      default:
-        current_mode = 1;
-        break;
-    }
-
-    /* ============================================================
-     * Baca DHT11 setiap 2000ms (non-blocking menggunakan HAL_GetTick)
-     * DHT_readData mengirim start-signal lalu menunggu data lewat EXTI.
-     * ============================================================ */
-    if ((current_tick - dht11_last_tick) >= 2000) {
-      dht11_last_tick = current_tick;
-      DHT_readData(&dht11, &dht11_temp, &dht11_hum);
-    }
-
-    /* ============================================================
-     * Kirim data ke USB CDC tiap 200ms
-     * ============================================================ */
-    static uint32_t usb_last_tick = 0;
-    if (current_tick - usb_last_tick >= 200) {
-      usb_last_tick = current_tick;
-
-      // Siapkan buffer untuk semua data termasuk DHT11
-      char buffer[220];
-
-      // Format JSON — field names sesuai dengan STM32Data di dashboard
-      // Gunakan %d (integer) agar tidak perlu linker flag -u _printf_float
-      uint32_t current_score = (current_mode == 9 || game_lobby == 2) ? BinaryGame_GetScore() : rg.score;
-      uint8_t current_lives  = (current_mode == 9 || game_lobby == 2) ? 0 : rg.lives;
-
-      uint16_t len = snprintf(buffer, sizeof(buffer),
-        "{\"mode\":%d,\"gameLobby\":%d,\"adc\":%lu,\"counter\":%lu,\"ledMask\":%d,\"dist\":%lu,\"temp\":%d,\"hum\":%d,\"score\":%lu,\"lives\":%d,\"binaryTarget\":%d,\"binaryRound\":%d,\"rhythmLevel\":%d}\r\n",
-        current_mode,
-        game_lobby,
-        adc_dma_val,
-        counter_value,
-        current_led_mask,
-        distance_cm,
-        (int)dht11_temp,
-        (int)dht11_hum,
-        current_score,
-        (int)current_lives,
-        (int)BinaryGame_GetTarget(),
-        (int)BinaryGame_GetRound(),
-        (int)RhythmGame_GetLevel());
-
-      // Kirim data menggunakan USB CDC
-      CDC_Transmit_FS((uint8_t*)buffer, len);
-    }
+    Process_USB_Command_Loop();
+    Process_Servo_Control(current_tick);
+    Process_HCSR04(current_tick);
+    Process_Buttons();
+    Process_Lobby_Timeout(current_tick);
+    Process_Game_Start();
+    Process_Modes(current_tick);
+    Process_DHT11(current_tick);
+    Process_USB_CDC_Transmit(current_tick);
 
   }
   /* USER CODE END 3 */
